@@ -5,6 +5,7 @@ import SignalMonitor from "@/components/SignalMonitor";
 import ForecastPanel from "@/components/ForecastPanel";
 import PlannerPanel from "@/components/PlannerPanel";
 import AccuracyBanner from "@/components/AccuracyBanner";
+import AIAdvisor from "@/components/AIAdvisor";
 
 export default function Index() {
   const [selectedSkuId, setSelectedSkuId] = useState(ALL_SKUS[0].id);
@@ -37,6 +38,8 @@ export default function Index() {
       <footer className="text-center py-4 text-xs text-ds-text-tertiary">
         Powered by ML Ensemble (GBM + LSTM) · Demand Forecasting POC
       </footer>
+
+      <AIAdvisor sku={sku} activeScenario="base" />
     </div>
   );
 }
