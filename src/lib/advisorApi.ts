@@ -16,6 +16,11 @@ export interface AdvisorContext {
   };
 }
 
+// ── Gemini model config ───────────────────────────────────────────────────────
+const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+// ── System prompt builder ─────────────────────────────────────────────────────
 function buildSystemPrompt(ctx: AdvisorContext): string {
   const sku = ctx.sku;
   const scenario = sku.scenarios[ctx.activeScenario];
@@ -88,21 +93,136 @@ CUSTOM SLIDER SETTINGS (user-adjusted):
 
 ━━━ RESPONSE RULES ━━━
 
-1. Always cite specific numbers from the data above.
-2. When asked about profit/revenue: frame in terms of demand volume × margin levers.
-3. When asked "what if PMI goes to X": compute the directional impact using +0.8% demand per PMI point above base, show the new demand estimate, then give 3 specific actions.
-4. Structure answers as:
-   → Situation: 1 sentence quantifying the scenario
-   → Impact: what this means in numbers
-   → Actions: numbered list of 3–5 specific, time-bound actions
-   → Risk: 1 sentence on what to watch
-5. Keep answers under 250 words unless the question explicitly asks for a full analysis.
-6. Never say "I don't have enough data" — always reason from the data provided.
-7. Use markdown formatting for clarity: bold for key numbers, bullet lists for actions.`;
+**RULE 0 — MOST IMPORTANT: Read the user's intent first.**
+
+- If the message is a greeting, pleasantry, or off-topic (e.g. "hi", "hello", "thanks", "how are you", "what can you do"):
+  → Respond naturally and conversationally in 1–2 sentences. DO NOT use the CRISP template. DO NOT cite any numbers.
+  → Example: "Hi! I'm DemandSense AI — ask me anything about your Electronics-A forecast, scenarios, or supply chain decisions."
+
+- If the message is a planning, forecasting, supply-chain, scenario, or data question:
+  → Use JSON MODE rules below.
+
+JSON MODE RULES (only for domain questions):
+1. Respond as strict JSON ONLY (no markdown, no prose outside JSON, no code fences).
+2. The first line must still be [VISUAL:TYPE], then a blank line, then JSON.
+3. Use this exact JSON shape:
+{
+  "response_type": "analysis",
+  "title": "short title",
+  "situation": "1 short sentence",
+  "impact": [
+    { "label": "metric name", "value": "number with unit", "detail": "short meaning" },
+    { "label": "metric name", "value": "number with unit", "detail": "short meaning" }
+  ],
+  "actions": [
+    { "step": 1, "timeframe": "Week X", "action": "clear action" },
+    { "step": 2, "timeframe": "Week X", "action": "clear action" },
+    { "step": 3, "timeframe": "Week X", "action": "clear action" }
+  ],
+  "risk": "1 short sentence",
+  "kpis": {
+    "forecast_12w_avg": "value",
+    "production_commit": "value",
+    "gap_vs_target": "value"
+  },
+  "visual": {
+    "title": "short chart title",
+    "type": "bar_range | bar",
+    "unit": "units/wk | days | %",
+    "baseline": { "label": "commit | target | base", "value": 0 },
+    "data": [
+      { "label": "W1", "value": 0, "low": 0, "high": 0 },
+      { "label": "W2", "value": 0, "low": 0, "high": 0 }
+    ]
+  }
+}
+4. Keep output concise and decision-ready.
+5. Always use numbers from session data.
+6. For PMI what-if, apply +0.8% demand per PMI point above base (or negative below base).
+7. For greetings/off-topic, DO NOT use JSON — return simple natural text.
+8. Never say "I don't have enough data".
+9. Tone: professional and calm.
+
+VISUAL DATA RULES (MANDATORY for domain questions):
+- Always include the "visual" object with numeric data the UI can chart.
+- Match the visual to the [VISUAL:TYPE] tag:
+  * DEMAND_TREND → 6–8 weekly points with low/high range; baseline = production_commit.
+  * SCENARIO_COMPARE → 3 bars for Bull/Base/Bear with value = peak_demand; baseline = production_commit.
+  * PMI_SENSITIVITY → 2 bars (Base vs Target) with value = demand; baseline optional.
+  * INVENTORY → 2 bars (Backlog vs Target cover) with value = days.
+  * FREIGHT → 1–3 bars (Index + MoM) with value = index or %.
+  * CANCEL_RATE → 1–3 bars (Bull/Base/Bear) with value = cancel rate %.
+- Use realistic labels ("W1", "W2" or "Bull", "Base", "Bear").
+- Keep values numeric (no units in numbers). Units go in "unit".
+
+REPORT MODE RULES (ONLY when user explicitly asks for a report):
+1. Return JSON with "response_type": "report".
+2. Include keys: executive_summary, kpi_snapshot, scenario_comparison, key_risks, action_plan_30_60_90, final_recommendation.
+3. scenario_comparison must be an array of objects with keys: scenario, peak_demand, production_commit, gap_vs_commit, suggested_stance.
+4. Keep report brief and decision-ready.
+5. Keep tone executive and practical.
+
+IMPORTANT: Do NOT use report mode unless the user explicitly says "report", "summary report", "download report", or "generate report". For all other questions, use analysis JSON.
+
+━━━ VISUAL DIRECTIVE (MANDATORY — EVERY RESPONSE) ━━━
+
+The VERY FIRST line of your response must be exactly one of these visual tags.
+Output the tag alone on its own line, then a blank line, then your answer text.
+The tag drives a live chart in the UI — choose based on the question's primary intent:
+
+[VISUAL:NONE]            → greeting, pleasantry, thanks, off-topic, "what can you do"
+[VISUAL:PMI_SENSITIVITY] → any question about PMI changing, PMI sensitivity, "what if PMI is X"
+[VISUAL:SCENARIO_COMPARE]→ compare scenarios, bull vs base vs bear, risk comparison, shortfall, report requests
+[VISUAL:DEMAND_TREND]    → weekly forecast, demand outlook, production volume, profit, "how is demand"
+[VISUAL:INVENTORY]       → backlog days, inventory cover, buffer, days-of-supply, stock
+[VISUAL:FREIGHT]         → freight index, logistics, supply chain capacity, freight MoM
+[VISUAL:CANCEL_RATE]     → cancel rate, order cancellations, demand reversal
+
+Format of every response:
+[VISUAL:TYPE]
+
+<your answer here>
+
+Examples:
+- "hi" → first line is [VISUAL:NONE]
+- "what if PMI drops to 45?" → first line is [VISUAL:PMI_SENSITIVITY]
+- "compare all 3 scenarios" → first line is [VISUAL:SCENARIO_COMPARE]
+- "what's my week 1 forecast?" → first line is [VISUAL:DEMAND_TREND]
+- "how much inventory buffer?" → first line is [VISUAL:INVENTORY]
+- "freight trending?" → first line is [VISUAL:FREIGHT]
+- "is cancel rate a problem?" → first line is [VISUAL:CANCEL_RATE]
+- "should I increase production in bull?" → first line is [VISUAL:DEMAND_TREND]
+- "what signals to watch?" → first line is [VISUAL:SCENARIO_COMPARE]
+
+Do NOT omit this tag. Do NOT put any other text on the first line.`;
 }
 
-const ADVISOR_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/advisor`;
+// ── Gemini content builder ────────────────────────────────────────────────────
+// Gemini doesn't have a native system role in the same way as OpenAI.
+// Convention: prefix the conversation with a user/model pair for system context.
+function buildGeminiContents(
+  messages: AdvisorMessage[],
+  systemPrompt: string
+): Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> {
+  const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
 
+  // System context injected as first user turn
+  contents.push({ role: "user", parts: [{ text: `[SYSTEM CONTEXT]\n${systemPrompt}` }] });
+  contents.push({ role: "model", parts: [{ text: "Understood. I have full context of this planning session and will respond according to all the rules specified." }] });
+
+  // Real conversation history (skip any internal system messages)
+  for (const m of messages) {
+    if (m.role === "system") continue;
+    contents.push({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    });
+  }
+
+  return contents;
+}
+
+// ── Main streaming function ───────────────────────────────────────────────────
 export async function streamAdvisor({
   messages,
   ctx,
@@ -116,64 +236,89 @@ export async function streamAdvisor({
   onDone: () => void;
   onError: (err: string) => void;
 }) {
-  const systemPrompt = buildSystemPrompt(ctx);
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+  if (!apiKey) {
+    onError("Gemini API key not configured (VITE_GEMINI_API_KEY).");
+    return;
+  }
 
-  const resp = await fetch(ADVISOR_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-    },
-    body: JSON.stringify({
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      systemPrompt,
-    }),
-  });
+  const systemPrompt = buildSystemPrompt(ctx);
+  const contents = buildGeminiContents(messages, systemPrompt);
+
+  // Use SSE streaming endpoint
+  const url = `${GEMINI_BASE}/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents,
+        generationConfig: {
+          temperature: 0.4,
+          topP: 0.9,
+          maxOutputTokens: 4096,
+        },
+      }),
+    });
+  } catch (err) {
+    onError(`Network error: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
 
   if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    onError(data.error || `Request failed (${resp.status})`);
+    let body = "";
+    try { body = await resp.text(); } catch { /* ignore */ }
+    const parsed = (() => { try { return JSON.parse(body); } catch { return null; } })();
+    const msg = parsed?.error?.message || `Gemini API error ${resp.status}`;
+    onError(msg);
     return;
   }
 
   if (!resp.body) {
-    onError("No response stream");
+    onError("No response stream from Gemini.");
     return;
   }
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
-  let textBuffer = "";
+  let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    textBuffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    let newlineIndex: number;
-    while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-      let line = textBuffer.slice(0, newlineIndex);
-      textBuffer = textBuffer.slice(newlineIndex + 1);
+      buffer += decoder.decode(value, { stream: true });
 
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      if (line.startsWith(":") || line.trim() === "") continue;
-      if (!line.startsWith("data: ")) continue;
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) !== -1) {
+        let line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
 
-      const jsonStr = line.slice(6).trim();
-      if (jsonStr === "[DONE]") {
-        onDone();
-        return;
-      }
+        if (line.endsWith("\r")) line = line.slice(0, -1);
+        if (!line.startsWith("data:")) continue;
 
-      try {
-        const parsed = JSON.parse(jsonStr);
-        const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-        if (content) onDelta(content);
-      } catch {
-        textBuffer = line + "\n" + textBuffer;
-        break;
+        const jsonStr = line.slice(5).trim();
+        if (!jsonStr || jsonStr === "[DONE]") continue;
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+          // Gemini SSE: candidates[0].content.parts[0].text
+          const text: string | undefined =
+            parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) onDelta(text);
+        } catch {
+          // Partial JSON — put back and wait for more data
+          buffer = line + "\n" + buffer;
+          break;
+        }
       }
     }
+  } catch (err) {
+    onError(`Stream read error: ${err instanceof Error ? err.message : String(err)}`);
+    return;
   }
 
   onDone();

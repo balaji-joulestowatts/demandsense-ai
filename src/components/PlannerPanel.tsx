@@ -91,15 +91,20 @@ function ScenarioCard({ scenario }: { scenario: Scenario }) {
 
 export default function PlannerPanel({ sku }: PlannerPanelProps) {
   return (
-    <div>
-      <h2 className="text-lg font-medium text-ds-text-primary mb-4">
-        Planner Alignment — scenario comparison
-      </h2>
+    <section className="ds-section-card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+          <p className="ds-section-title">Planner alignment</p>
+          <h2 className="text-lg font-medium text-ds-text-primary">
+            Scenario comparison
+          </h2>
+        </div>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {(["bull", "base", "bear"] as const).map((id) => (
           <ScenarioCard key={id} scenario={sku.scenarios[id]} />
         ))}
       </div>
-    </div>
+    </section>
   );
 }

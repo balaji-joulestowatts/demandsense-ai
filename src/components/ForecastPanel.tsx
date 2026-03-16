@@ -76,7 +76,7 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
   const showCustom = customMultiplier != null;
 
   return (
-    <div>
+    <section className="ds-section-card p-4">
       {/* Scenario cards + adjust button */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-medium text-ds-text-primary">Scenario Forecast</h2>
@@ -99,12 +99,12 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
               key={id}
               onClick={() => toggleScenario(id)}
               className={clsx(
-                "text-left p-4 rounded-xl border-l-4 ds-transition relative",
+                "text-left p-4 rounded-xl border-l-4 ds-transition relative pro-card-hover",
                 isActive
-                  ? `${meta.bgClass} shadow-md -translate-y-px`
-                  : "bg-[#f8fafc] opacity-60 grayscale-[0.5]"
+                  ? `${meta.bgClass} ring-1 ring-offset-0 -translate-y-px`
+                  : "bg-white/65 opacity-80"
               )}
-              style={{ borderLeftColor: isActive ? meta.color : "#cbd5e1" }}
+              style={{ borderLeftColor: isActive ? meta.color : "#cbd5e1", boxShadow: isActive ? `0 16px 26px -20px ${meta.color}66` : undefined }}
             >
               {isActive && (
                 <span
@@ -112,9 +112,9 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
                   style={{ backgroundColor: meta.color }}
                 />
               )}
-              <p className="font-semibold text-sm" style={{ color: meta.color }}>{scenario.label}</p>
-              <p className="text-[13px] text-ds-text-secondary mt-0.5">{scenario.description}</p>
-              <p className="text-xs italic text-ds-text-tertiary mt-1">{scenario.assumption}</p>
+              <p className="font-semibold text-sm tracking-wide uppercase" style={{ color: meta.color }}>{scenario.label}</p>
+              <p className="text-[13px] text-ds-text-secondary mt-1 leading-snug">{scenario.description}</p>
+              <p className="text-[11px] text-ds-text-tertiary mt-1">{scenario.assumption}</p>
               <p className="text-sm font-medium text-ds-text-primary mt-2 tabular-nums">
                 {scenario.peak_demand.toLocaleString()} {sku.unit} peak
               </p>
@@ -154,7 +154,7 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
       </div>
 
       {/* Chart */}
-      <div className="ds-card p-4 animate-pulse-subtle">
+      <div className="ds-card p-4 animate-pulse-subtle border border-blue-100/70">
         <ResponsiveContainer width="100%" height={380}>
           <ComposedChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -297,6 +297,6 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
         sliders={sliders}
         onSlidersChange={setSliders}
       />
-    </div>
+    </section>
   );
 }

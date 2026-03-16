@@ -22,7 +22,7 @@ export default function AccuracyBanner({ sku }: AccuracyBannerProps) {
   ];
 
   return (
-    <div className="rounded-2xl border border-dashed bg-ds-surface-muted p-5">
+    <section className="ds-section-card p-5">
       {/* Collapsed row */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -89,6 +89,6 @@ export default function AccuracyBanner({ sku }: AccuracyBannerProps) {
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
