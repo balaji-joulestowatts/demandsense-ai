@@ -38,6 +38,50 @@ export type PlannerOutputs = {
   action_color: "red" | "amber" | "green";
 };
 
+export type SupplyPart = {
+  id: string;
+  name: string;
+  uom: string;
+  supplier: string;
+  lead_time_weeks: number;
+  moq: number;
+  order_multiple?: number;
+};
+
+export type BomLine = {
+  part_id: string;
+  qty_per_sku: number;
+};
+
+export type InventoryLine = {
+  part_id: string;
+  on_hand: number;
+  safety_stock: number;
+  allocated?: number;
+};
+
+export type PurchaseOrderStatus = "confirmed" | "in_transit" | "planned";
+
+export type PurchaseOrderLine = {
+  part_id: string;
+  qty: number;
+};
+
+export type PurchaseOrder = {
+  po_number: string;
+  supplier: string;
+  status: PurchaseOrderStatus;
+  eta_week: number; // 1..52, relative to 'today' in this mock dataset
+  lines: PurchaseOrderLine[];
+};
+
+export type SupplyProfile = {
+  parts: SupplyPart[];
+  bom: BomLine[];
+  inventory: InventoryLine[];
+  open_pos: PurchaseOrder[];
+};
+
 export type Scenario = {
   id: "bull" | "base" | "bear";
   label: string;
@@ -57,6 +101,7 @@ export type SKUData = {
   unit: string;
   category: string;
   historical: HistoricalPoint[];
+  supply?: SupplyProfile;
   scenarios: {
     bull: Scenario;
     base: Scenario;
@@ -142,6 +187,59 @@ const electronicsA: SKUData = {
   unit: "units",
   category: "Consumer Electronics Components",
   historical: buildHistorical(1100, 85, 1.2),
+  supply: {
+    parts: [
+      { id: "PCB-4L", name: "4-layer PCB", uom: "pcs", supplier: "Shenzhen Circuits", lead_time_weeks: 4, moq: 500, order_multiple: 100 },
+      { id: "MCU-STM32", name: "Microcontroller (STM32 class)", uom: "pcs", supplier: "ST Channel Partner", lead_time_weeks: 6, moq: 1000, order_multiple: 500 },
+      { id: "DRAM-8Gb", name: "DRAM 8Gb", uom: "pcs", supplier: "Memory Distributors Ltd", lead_time_weeks: 8, moq: 2000, order_multiple: 500 },
+      { id: "CONN-USBC", name: "USB-C Connector", uom: "pcs", supplier: "ConnectorWorks", lead_time_weeks: 3, moq: 3000, order_multiple: 1000 },
+      { id: "CASE-ABS", name: "ABS Enclosure", uom: "pcs", supplier: "PolyMold Plastics", lead_time_weeks: 5, moq: 800, order_multiple: 200 },
+    ],
+    bom: [
+      { part_id: "PCB-4L", qty_per_sku: 1 },
+      { part_id: "MCU-STM32", qty_per_sku: 1 },
+      { part_id: "DRAM-8Gb", qty_per_sku: 2 },
+      { part_id: "CONN-USBC", qty_per_sku: 1 },
+      { part_id: "CASE-ABS", qty_per_sku: 1 },
+    ],
+    inventory: [
+      { part_id: "PCB-4L", on_hand: 4200, safety_stock: 1800 },
+      { part_id: "MCU-STM32", on_hand: 3100, safety_stock: 2200 },
+      { part_id: "DRAM-8Gb", on_hand: 9000, safety_stock: 6500 },
+      { part_id: "CONN-USBC", on_hand: 14500, safety_stock: 9000 },
+      { part_id: "CASE-ABS", on_hand: 5200, safety_stock: 2400 },
+    ],
+    open_pos: [
+      {
+        po_number: "PO-18421",
+        supplier: "Shenzhen Circuits",
+        status: "in_transit",
+        eta_week: 2,
+        lines: [{ part_id: "PCB-4L", qty: 3000 }],
+      },
+      {
+        po_number: "PO-18477",
+        supplier: "ST Channel Partner",
+        status: "confirmed",
+        eta_week: 5,
+        lines: [{ part_id: "MCU-STM32", qty: 4000 }],
+      },
+      {
+        po_number: "PO-18503",
+        supplier: "Memory Distributors Ltd",
+        status: "planned",
+        eta_week: 8,
+        lines: [{ part_id: "DRAM-8Gb", qty: 6000 }],
+      },
+      {
+        po_number: "PO-18466",
+        supplier: "ConnectorWorks",
+        status: "confirmed",
+        eta_week: 3,
+        lines: [{ part_id: "CONN-USBC", qty: 10000 }],
+      },
+    ],
+  },
   model_accuracy: {
     ensemble_mape_1w: 4.2,
     ensemble_mape_1m: 7.8,
@@ -247,6 +345,31 @@ const componentsB: SKUData = {
   unit: "units",
   category: "Industrial Sub-assemblies",
   historical: buildHistorical(740, 55, 2.5),
+  supply: {
+    parts: [
+      { id: "CAST-AL", name: "Aluminium casting", uom: "pcs", supplier: "FoundryCo", lead_time_weeks: 5, moq: 300, order_multiple: 50 },
+      { id: "BRG-6204", name: "Bearing 6204", uom: "pcs", supplier: "MotionSupply", lead_time_weeks: 4, moq: 2000, order_multiple: 500 },
+      { id: "SEAL-NBR", name: "NBR Seal", uom: "pcs", supplier: "SealTech", lead_time_weeks: 3, moq: 1500, order_multiple: 500 },
+      { id: "FAST-M8", name: "Fasteners M8 kit", uom: "kits", supplier: "FastenAll", lead_time_weeks: 2, moq: 1000, order_multiple: 250 },
+    ],
+    bom: [
+      { part_id: "CAST-AL", qty_per_sku: 1 },
+      { part_id: "BRG-6204", qty_per_sku: 2 },
+      { part_id: "SEAL-NBR", qty_per_sku: 1 },
+      { part_id: "FAST-M8", qty_per_sku: 1 },
+    ],
+    inventory: [
+      { part_id: "CAST-AL", on_hand: 1800, safety_stock: 900 },
+      { part_id: "BRG-6204", on_hand: 5200, safety_stock: 4000 },
+      { part_id: "SEAL-NBR", on_hand: 3300, safety_stock: 2500 },
+      { part_id: "FAST-M8", on_hand: 2400, safety_stock: 1800 },
+    ],
+    open_pos: [
+      { po_number: "PO-77210", supplier: "FoundryCo", status: "confirmed", eta_week: 4, lines: [{ part_id: "CAST-AL", qty: 1000 }] },
+      { po_number: "PO-77241", supplier: "MotionSupply", status: "in_transit", eta_week: 2, lines: [{ part_id: "BRG-6204", qty: 4000 }] },
+      { po_number: "PO-77288", supplier: "SealTech", status: "planned", eta_week: 6, lines: [{ part_id: "SEAL-NBR", qty: 3000 }] },
+    ],
+  },
   model_accuracy: {
     ensemble_mape_1w: 3.8,
     ensemble_mape_1m: 8.9,
@@ -352,6 +475,28 @@ const rawMaterialC: SKUData = {
   unit: "MT",
   category: "Bulk Commodity Inputs",
   historical: buildHistorical(320, 28, 3.8),
+  supply: {
+    parts: [
+      { id: "ORE-BASE", name: "Base ore feedstock", uom: "MT", supplier: "MineralEx", lead_time_weeks: 6, moq: 800, order_multiple: 100 },
+      { id: "ADTV-FLX", name: "Processing additive", uom: "MT", supplier: "ChemTrade", lead_time_weeks: 3, moq: 120, order_multiple: 20 },
+      { id: "BAG-JUMBO", name: "Jumbo bags", uom: "pcs", supplier: "PackPro", lead_time_weeks: 4, moq: 2000, order_multiple: 500 },
+    ],
+    bom: [
+      { part_id: "ORE-BASE", qty_per_sku: 1 },
+      { part_id: "ADTV-FLX", qty_per_sku: 0.04 },
+      { part_id: "BAG-JUMBO", qty_per_sku: 2.5 },
+    ],
+    inventory: [
+      { part_id: "ORE-BASE", on_hand: 2100, safety_stock: 1400 },
+      { part_id: "ADTV-FLX", on_hand: 160, safety_stock: 110 },
+      { part_id: "BAG-JUMBO", on_hand: 12000, safety_stock: 8000 },
+    ],
+    open_pos: [
+      { po_number: "PO-33901", supplier: "MineralEx", status: "in_transit", eta_week: 3, lines: [{ part_id: "ORE-BASE", qty: 1200 }] },
+      { po_number: "PO-33944", supplier: "ChemTrade", status: "confirmed", eta_week: 2, lines: [{ part_id: "ADTV-FLX", qty: 80 }] },
+      { po_number: "PO-33978", supplier: "PackPro", status: "planned", eta_week: 5, lines: [{ part_id: "BAG-JUMBO", qty: 8000 }] },
+    ],
+  },
   model_accuracy: {
     ensemble_mape_1w: 5.1,
     ensemble_mape_1m: 10.2,
@@ -457,6 +602,31 @@ const finishedGoodsD: SKUData = {
   unit: "units",
   category: "Packaged End Products",
   historical: buildHistorical(2200, 180, 5.9),
+  supply: {
+    parts: [
+      { id: "RM-BASE", name: "Core raw material", uom: "kg", supplier: "BaseChem", lead_time_weeks: 4, moq: 20000, order_multiple: 5000 },
+      { id: "PKG-CARTON", name: "Printed carton", uom: "pcs", supplier: "BoxWorks", lead_time_weeks: 3, moq: 10000, order_multiple: 2000 },
+      { id: "LBL-ROLL", name: "Label roll", uom: "rolls", supplier: "LabelLine", lead_time_weeks: 2, moq: 200, order_multiple: 50 },
+      { id: "FILM-SHR", name: "Shrink film", uom: "kg", supplier: "PolyPack", lead_time_weeks: 2, moq: 5000, order_multiple: 1000 },
+    ],
+    bom: [
+      { part_id: "RM-BASE", qty_per_sku: 0.62 },
+      { part_id: "PKG-CARTON", qty_per_sku: 1 },
+      { part_id: "LBL-ROLL", qty_per_sku: 0.01 },
+      { part_id: "FILM-SHR", qty_per_sku: 0.05 },
+    ],
+    inventory: [
+      { part_id: "RM-BASE", on_hand: 88000, safety_stock: 65000 },
+      { part_id: "PKG-CARTON", on_hand: 42000, safety_stock: 38000 },
+      { part_id: "LBL-ROLL", on_hand: 340, safety_stock: 260 },
+      { part_id: "FILM-SHR", on_hand: 14000, safety_stock: 11000 },
+    ],
+    open_pos: [
+      { po_number: "PO-90111", supplier: "BoxWorks", status: "in_transit", eta_week: 1, lines: [{ part_id: "PKG-CARTON", qty: 25000 }] },
+      { po_number: "PO-90126", supplier: "BaseChem", status: "confirmed", eta_week: 3, lines: [{ part_id: "RM-BASE", qty: 60000 }] },
+      { po_number: "PO-90157", supplier: "LabelLine", status: "planned", eta_week: 2, lines: [{ part_id: "LBL-ROLL", qty: 200 }] },
+    ],
+  },
   model_accuracy: {
     ensemble_mape_1w: 3.4,
     ensemble_mape_1m: 6.9,

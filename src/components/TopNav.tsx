@@ -40,7 +40,7 @@ export default function TopNav({ selectedSkuId, onSkuChange }: TopNavProps) {
           ML Ensemble · GBM + LSTM
         </span>
         <span className="text-muted-foreground text-[11px] uppercase tracking-wider font-medium">
-          Last updated: 16 Mar 2026
+          Last updated: 17 Mar 2026
         </span>
       </div>
     </nav>

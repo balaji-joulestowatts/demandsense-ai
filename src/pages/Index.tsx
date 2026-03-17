@@ -34,7 +34,7 @@ export default function Index() {
         <PredictionOverview sku={sku} activeScenario={activeScenario} />
         <SignalMonitor sku={sku} activeScenario={activeScenario} onScenarioChange={setActiveScenario} />
         <ForecastPanel sku={sku} />
-        <PlannerPanel sku={sku} />
+        <PlannerPanel sku={sku} activeScenario={activeScenario} />
         <AccuracyBanner sku={sku} />
       </main>
 

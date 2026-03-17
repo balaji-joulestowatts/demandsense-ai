@@ -64,6 +64,29 @@ This project is built with:
 
 Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
 
+### Deploy on Vercel
+
+This is a Vite + React SPA (React Router). For Vercel, the repo includes `vercel.json` to rewrite all routes to `index.html` so deep-links work.
+
+1) Import the Git repo in Vercel
+- **Framework preset**: `Vite`
+- **Install command**: `npm install`
+- **Build command**: `npm run build`
+- **Output directory**: `dist`
+
+2) Configure environment variables in Vercel (Project → Settings → Environment Variables)
+
+Required (used by the app at runtime/build):
+- `VITE_GEMINI_API_KEY`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+Add them for **Production**, **Preview**, and **Development** environments as needed, then redeploy.
+
+Notes:
+- Any `VITE_*` variable is bundled into the browser build. Treat `VITE_GEMINI_API_KEY` as public; if you need to keep keys secret, route AI calls through a server/edge function instead.
+- Supabase Edge Function secrets (e.g., `LOVABLE_API_KEY`) are configured in Supabase, not Vercel.
+
 ## Can I connect a custom domain to my Lovable project?
 
 Yes, you can!
