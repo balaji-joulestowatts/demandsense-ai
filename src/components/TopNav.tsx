@@ -8,13 +8,15 @@ interface TopNavProps {
 
 export default function TopNav({ selectedSkuId, onSkuChange }: TopNavProps) {
   return (
-    <nav className="h-16 bg-[hsl(var(--ds-nav))] border-b border-white/10 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-30 backdrop-blur">
-      <div className="flex items-center gap-2">
-        <BarChart3 className="w-5 h-5 text-ds-nav-foreground" />
-        <span className="font-bold text-ds-nav-foreground tracking-display text-lg">
+    <nav className="h-14 bg-card border-b flex items-center justify-between px-4 sm:px-8 sticky top-0 z-30">
+      <div className="flex items-center gap-3">
+        <div className="bg-primary text-primary-foreground p-1 rounded-md">
+           <BarChart3 className="w-4 h-4" />
+        </div>
+        <span className="font-semibold text-foreground tracking-tight text-[15px]">
           DemandSense
         </span>
-        <span className="hidden sm:inline-flex text-[10px] font-semibold uppercase tracking-widest rounded-full bg-white/10 text-[#bfdbfe] px-2 py-0.5 border border-white/10">
+        <span className="hidden sm:inline-flex text-[10px] font-medium uppercase tracking-widest text-muted-foreground ml-2">
           Prediction Studio
         </span>
       </div>
@@ -23,7 +25,7 @@ export default function TopNav({ selectedSkuId, onSkuChange }: TopNavProps) {
         <select
           value={selectedSkuId}
           onChange={(e) => onSkuChange(e.target.value)}
-          className="bg-[#0b1730] border border-[#334155] text-[#e2e8f0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ds-base ds-transition min-w-[320px]"
+          className="bg-secondary/50 border-none text-foreground font-medium rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring ds-transition min-w-[280px] shadow-sm hover:bg-secondary/80 cursor-pointer"
         >
           {ALL_SKUS.map((sku: SKUData) => (
             <option key={sku.id} value={sku.id}>
@@ -34,10 +36,10 @@ export default function TopNav({ selectedSkuId, onSkuChange }: TopNavProps) {
       </div>
 
       <div className="hidden md:flex items-center gap-4">
-        <span className="inline-flex items-center bg-[#0b1730] border border-[#334155] text-[#94a3b8] rounded-full px-3 py-1 font-mono text-[10px] tracking-wider uppercase">
+        <span className="inline-flex items-center bg-secondary/50 text-muted-foreground rounded-md px-2.5 py-1 font-mono text-[10px] tracking-wider uppercase">
           ML Ensemble · GBM + LSTM
         </span>
-        <span className="text-[#94a3b8] text-xs">
+        <span className="text-muted-foreground text-[11px] uppercase tracking-wider font-medium">
           Last updated: 16 Mar 2026
         </span>
       </div>

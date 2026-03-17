@@ -34,84 +34,82 @@ export default function PredictionOverview({ sku, activeScenario }: PredictionOv
     {
       key: "week1",
       title: "Week 1 forecast",
-      icon: <TrendingUp className="h-3.5 w-3.5" />,
+      icon: <TrendingUp className="h-4 w-4" />,
       value: `${week1.demand.toLocaleString()} ${sku.unit}`,
       sub: `Range ${week1.lower.toLocaleString()}–${week1.upper.toLocaleString()}`,
     },
     {
       key: "scenario",
       title: "Active scenario",
-      icon: <BrainCircuit className="h-3.5 w-3.5" />,
+      icon: <BrainCircuit className="h-4 w-4" />,
       value: activeScenario.charAt(0).toUpperCase() + activeScenario.slice(1),
       sub: `Peak ${scenario.peak_demand.toLocaleString()} ${sku.unit}`,
     },
     {
       key: "signal",
       title: "Signal strength",
-      icon: <Gauge className="h-3.5 w-3.5" />,
+      icon: <Gauge className="h-4 w-4" />,
       value: `PMI ${pmi.toFixed(1)}`,
       sub: `Volatility band ±${volatilityBand}%`,
     },
     {
       key: "alert",
       title: "Execution alert",
-      icon: <TriangleAlert className="h-3.5 w-3.5" />,
+      icon: <TriangleAlert className="h-4 w-4" />,
       value: alertText,
       sub: `Commit ${scenario.planner.production_commit.toLocaleString()} ${sku.unit}/wk`,
     },
   ];
 
   return (
-    <section className="ds-hero relative overflow-hidden rounded-2xl border border-[hsl(var(--ds-border-subtle))] p-4 sm:p-5">
-      <div className="pointer-events-none absolute -top-20 -right-24 h-52 w-52 rounded-full bg-blue-500/20 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-24 -left-16 h-44 w-44 rounded-full bg-emerald-400/20 blur-3xl" />
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative z-10">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-[hsl(var(--ds-text-tertiary))]">Prediction cockpit</p>
-          <h1 className="text-xl sm:text-2xl font-semibold text-[hsl(var(--ds-text-primary))] tracking-tight">
+    <section className="bg-card rounded-xl border p-5 sm:p-6 mb-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <p className="text-xs uppercase font-semibold tracking-wider text-muted-foreground mb-1">Prediction cockpit</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
             {sku.name} demand outlook
           </h1>
         </div>
-        <span className="relative z-10 inline-flex items-center gap-1.5 rounded-full border border-blue-200/70 bg-white/70 px-3 py-1 text-xs font-medium text-[hsl(var(--ds-text-secondary))] backdrop-blur">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary">
           <BrainCircuit className="h-3.5 w-3.5" />
           Live prediction mode
         </span>
       </div>
 
-      <div className="relative z-10 mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         {kpis.map((item) => (
-          <div key={item.key} className="ds-kpi-card-pro">
-            <div className="flex items-center justify-between gap-2">
-              <p className="ds-kpi-label">{item.title}</p>
-              <span className="ds-mini-icon">{item.icon}</span>
+          <div key={item.key} className="ds-kpi-card group border border-border/70 hover:border-border">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <p className="ds-kpi-label mb-0">{item.title}</p>
+              <span className="ds-mini-icon text-muted-foreground group-hover:text-foreground transition-colors">{item.icon}</span>
             </div>
             <p className={item.key === "alert"
-              ? "mt-2 text-base leading-snug font-semibold text-[hsl(var(--ds-text-primary))]"
-              : "mt-2 text-[26px] leading-none font-semibold tracking-[-0.02em] text-[hsl(var(--ds-text-primary))] tabular-nums"
+              ? "text-lg leading-tight font-semibold text-foreground tracking-tight"
+              : "text-2xl leading-none font-bold tracking-tight text-foreground tabular-nums"
             }>
               {item.value}
             </p>
-            <p className="ds-kpi-sub">{item.sub}</p>
+            <p className="ds-kpi-sub mt-2">{item.sub}</p>
           </div>
         ))}
       </div>
 
-      <div className="relative z-10 mt-4 pro-card p-3">
-        <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--ds-text-secondary))]">
-          <TrendingUp className="h-3.5 w-3.5" /> Scenario probability blend (signal-derived)
+      <div className="ds-kpi-card bg-secondary/30 border-none shadow-none">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+          <TrendingUp className="h-4 w-4" /> Scenario probability blend (signal-derived)
         </div>
-        <div className="space-y-2 text-xs">
+        <div className="space-y-3">
           {[
-            { label: "Bull", value: bullProb, color: "bg-emerald-500" },
-            { label: "Base", value: baseProb, color: "bg-blue-500" },
-            { label: "Bear", value: bearProb, color: "bg-amber-500" },
+            { label: "Bull", value: bullProb, color: "bg-[hsl(var(--ds-bull))]" },
+            { label: "Base", value: baseProb, color: "bg-[hsl(var(--ds-base))]" },
+            { label: "Bear", value: bearProb, color: "bg-[hsl(var(--ds-bear))]" },
           ].map((row) => (
-            <div key={row.label}>
-              <div className="mb-1 flex justify-between"><span>{row.label}</span><span className="font-semibold">{row.value}%</span></div>
-              <div className="h-2 rounded-full bg-[hsl(var(--muted))] overflow-hidden">
-                <div className={`h-full ${row.color} shadow-[0_0_14px_rgba(37,99,235,0.35)]`} style={{ width: `${row.value}%` }} />
+            <div key={row.label} className="flex items-center gap-4">
+              <div className="w-12 text-sm font-medium text-foreground">{row.label}</div>
+              <div className="flex-1 h-2 rounded-full bg-secondary overflow-hidden">
+                <div className={`h-full ${row.color} rounded-full transition-all duration-500`} style={{ width: `${row.value}%` }} />
               </div>
+              <div className="w-10 text-right text-sm font-semibold tabular-nums text-muted-foreground">{row.value}%</div>
             </div>
           ))}
         </div>

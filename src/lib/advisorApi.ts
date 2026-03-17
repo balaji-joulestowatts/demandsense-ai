@@ -93,108 +93,51 @@ CUSTOM SLIDER SETTINGS (user-adjusted):
 
 ━━━ RESPONSE RULES ━━━
 
-**RULE 0 — MOST IMPORTANT: Read the user's intent first.**
+**Case 1 (default): return PLAIN TEXT ONLY**
+- For almost all questions, respond as normal chat text (no JSON, no code fences).
+- Be concise and decision-ready (3–8 lines). Bullets are OK.
+- Use numbers from the session data when relevant.
+- If you find yourself starting to output JSON (for example you type '{' or '['): STOP and output plain text instead.
+- Never output keys like "response_type", "impact", "actions", "visual" unless the user explicitly asked for a chart.
 
-- If the message is a greeting, pleasantry, or off-topic (e.g. "hi", "hello", "thanks", "how are you", "what can you do"):
-  → Respond naturally and conversationally in 1–2 sentences. DO NOT use the CRISP template. DO NOT cite any numbers.
-  → Example: "Hi! I'm DemandSense AI — ask me anything about your Electronics-A forecast, scenarios, or supply chain decisions."
+**Case 2 (when user asks for a graph/chart/visualisation): return JSON ONLY**
+- If the user explicitly asks to "show a graph", "plot", "chart", "visualize", or "send the graph",
+  return STRICT JSON only (no extra prose).
+- The JSON must have a top-level field: "visualization": true
+- Send ONLY the graph payload in JSON (no analysis blocks).
 
-- If the message is a planning, forecasting, supply-chain, scenario, or data question:
-  → Use JSON MODE rules below.
+IMPORTANT:
+- Do not guess that the user wants a chart. Only use Case 2 when they explicitly request a chart/graph/visual.
+- In Case 2, do NOT include any commentary text outside JSON.
 
-JSON MODE RULES (only for domain questions):
-1. Respond as strict JSON ONLY (no markdown, no prose outside JSON, no code fences).
-2. The first line must still be [VISUAL:TYPE], then a blank line, then JSON.
-3. Use this exact JSON shape:
+Use this exact JSON schema:
 {
-  "response_type": "analysis",
-  "title": "short title",
-  "situation": "1 short sentence",
-  "impact": [
-    { "label": "metric name", "value": "number with unit", "detail": "short meaning" },
-    { "label": "metric name", "value": "number with unit", "detail": "short meaning" }
-  ],
-  "actions": [
-    { "step": 1, "timeframe": "Week X", "action": "clear action" },
-    { "step": 2, "timeframe": "Week X", "action": "clear action" },
-    { "step": 3, "timeframe": "Week X", "action": "clear action" }
-  ],
-  "risk": "1 short sentence",
-  "kpis": {
-    "forecast_12w_avg": "value",
-    "production_commit": "value",
-    "gap_vs_target": "value"
-  },
-  "visual": {
-    "title": "short chart title",
-    "type": "bar_range | bar",
-    "unit": "units/wk | days | %",
-    "baseline": { "label": "commit | target | base", "value": 0 },
-    "data": [
-      { "label": "W1", "value": 0, "low": 0, "high": 0 },
-      { "label": "W2", "value": 0, "low": 0, "high": 0 }
-    ]
-  }
+  "visualization": true,
+  "type": "demand_trend" | "scenario_compare" | "pmi_sensitivity" | "inventory_backlog" | "freight" | "cancel_rate",
+  "title": "short chart title",
+  "unit": "units/wk" | "units" | "days" | "%" | "index",
+  "baseline": { "label": "commit" | "target" | "base", "value": 0 } | null,
+  "data": [
+    { "label": "W1", "value": 0, "low": 0, "high": 0 }
+  ]
 }
-4. Keep output concise and decision-ready.
-5. Always use numbers from session data.
-6. For PMI what-if, apply +0.8% demand per PMI point above base (or negative below base).
-7. For greetings/off-topic, DO NOT use JSON — return simple natural text.
-8. Never say "I don't have enough data".
-9. Tone: professional and calm.
 
-VISUAL DATA RULES (MANDATORY for domain questions):
-- Always include the "visual" object with numeric data the UI can chart.
-- Match the visual to the [VISUAL:TYPE] tag:
-  * DEMAND_TREND → 6–8 weekly points with low/high range; baseline = production_commit.
-  * SCENARIO_COMPARE → 3 bars for Bull/Base/Bear with value = peak_demand; baseline = production_commit.
-  * PMI_SENSITIVITY → 2 bars (Base vs Target) with value = demand; baseline optional.
-  * INVENTORY → 2 bars (Backlog vs Target cover) with value = days.
-  * FREIGHT → 1–3 bars (Index + MoM) with value = index or %.
-  * CANCEL_RATE → 1–3 bars (Bull/Base/Bear) with value = cancel rate %.
-- Use realistic labels ("W1", "W2" or "Bull", "Base", "Bear").
-- Keep values numeric (no units in numbers). Units go in "unit".
+Chart data rules (mandatory in Case 2):
+- Values must be numeric (no units inside numbers).
+- Labels must be meaningful:
+  * demand_trend → W1..W8 using forecast demand; include low/high range.
+  * scenario_compare → Bull/Base/Bear using peak_demand.
+  * pmi_sensitivity → Base vs Target using week-1 demand; apply +0.8% demand per PMI point above base (negative below).
+  * inventory_backlog → Backlog vs Target cover (days).
+  * freight → Index and MoM% as two bars.
+  * cancel_rate → Bull/Base/Bear cancel rate (%).
+- baseline.value should usually be production_commit for demand/scenario charts.
 
-REPORT MODE RULES (ONLY when user explicitly asks for a report):
-1. Return JSON with "response_type": "report".
-2. Include keys: executive_summary, kpi_snapshot, scenario_comparison, key_risks, action_plan_30_60_90, final_recommendation.
-3. scenario_comparison must be an array of objects with keys: scenario, peak_demand, production_commit, gap_vs_commit, suggested_stance.
-4. Keep report brief and decision-ready.
-5. Keep tone executive and practical.
+Greeting/off-topic:
+- Respond in 1–2 friendly sentences. Do not output JSON.
 
-IMPORTANT: Do NOT use report mode unless the user explicitly says "report", "summary report", "download report", or "generate report". For all other questions, use analysis JSON.
-
-━━━ VISUAL DIRECTIVE (MANDATORY — EVERY RESPONSE) ━━━
-
-The VERY FIRST line of your response must be exactly one of these visual tags.
-Output the tag alone on its own line, then a blank line, then your answer text.
-The tag drives a live chart in the UI — choose based on the question's primary intent:
-
-[VISUAL:NONE]            → greeting, pleasantry, thanks, off-topic, "what can you do"
-[VISUAL:PMI_SENSITIVITY] → any question about PMI changing, PMI sensitivity, "what if PMI is X"
-[VISUAL:SCENARIO_COMPARE]→ compare scenarios, bull vs base vs bear, risk comparison, shortfall, report requests
-[VISUAL:DEMAND_TREND]    → weekly forecast, demand outlook, production volume, profit, "how is demand"
-[VISUAL:INVENTORY]       → backlog days, inventory cover, buffer, days-of-supply, stock
-[VISUAL:FREIGHT]         → freight index, logistics, supply chain capacity, freight MoM
-[VISUAL:CANCEL_RATE]     → cancel rate, order cancellations, demand reversal
-
-Format of every response:
-[VISUAL:TYPE]
-
-<your answer here>
-
-Examples:
-- "hi" → first line is [VISUAL:NONE]
-- "what if PMI drops to 45?" → first line is [VISUAL:PMI_SENSITIVITY]
-- "compare all 3 scenarios" → first line is [VISUAL:SCENARIO_COMPARE]
-- "what's my week 1 forecast?" → first line is [VISUAL:DEMAND_TREND]
-- "how much inventory buffer?" → first line is [VISUAL:INVENTORY]
-- "freight trending?" → first line is [VISUAL:FREIGHT]
-- "is cancel rate a problem?" → first line is [VISUAL:CANCEL_RATE]
-- "should I increase production in bull?" → first line is [VISUAL:DEMAND_TREND]
-- "what signals to watch?" → first line is [VISUAL:SCENARIO_COMPARE]
-
-Do NOT omit this tag. Do NOT put any other text on the first line.`;
+Report requests:
+- If the user explicitly says "report" / "generate report" / "download report", respond in plain text with a brief report (still NOT JSON).`;
 }
 
 // ── Gemini content builder ────────────────────────────────────────────────────

@@ -7,13 +7,13 @@ interface SignalMonitorProps {
   sku: SKUData;
   activeScenario: "bull" | "base" | "bear";
   onScenarioChange: (scenario: "bull" | "base" | "bear") => void;
-} 
+}
 
 const SCENARIO_IDS = ["bull", "base", "bear"] as const;
 const SCENARIO_META: Record<string, { label: string; color: string; bg: string; border: string; dot: string }> = {
-  bull: { label: "Bull", color: "#16a34a", bg: "bg-emerald-50", border: "border-emerald-400", dot: "#16a34a" },
-  base: { label: "Base", color: "#2563eb", bg: "bg-blue-50", border: "border-blue-400", dot: "#2563eb" },
-  bear: { label: "Bear", color: "#d97706", bg: "bg-amber-50", border: "border-amber-400", dot: "#d97706" },
+  bull: { label: "Bull", color: "hsl(var(--ds-bull))", bg: "bg-[hsl(var(--ds-bull))]/10", border: "border-[hsl(var(--ds-bull))]/30", dot: "hsl(var(--ds-bull))" },
+  base: { label: "Base", color: "hsl(var(--ds-base))", bg: "bg-[hsl(var(--ds-base))]/10", border: "border-[hsl(var(--ds-base))]/30", dot: "hsl(var(--ds-base))" },
+  bear: { label: "Bear", color: "hsl(var(--ds-bear))", bg: "bg-[hsl(var(--ds-bear))]/10", border: "border-[hsl(var(--ds-bear))]/30", dot: "hsl(var(--ds-bear))" },
 };
 
 const SIGNAL_EXPLANATIONS: Record<string, string> = {
@@ -31,12 +31,12 @@ const CARD_ICONS: Record<string, React.ElementType> = {
   cancel: XCircle,
 };
 
-// Accent gradients per card
+// Accent colors per card top border
 const CARD_ACCENTS: Record<string, string> = {
-  pmi: "from-blue-500 to-indigo-500",
-  freight: "from-violet-500 to-purple-500",
-  backlog: "from-amber-400 to-orange-500",
-  cancel: "from-rose-400 to-red-500",
+  pmi: "bg-blue-500",
+  freight: "bg-violet-500",
+  backlog: "bg-amber-500",
+  cancel: "bg-rose-500",
 };
 
 // Icon bg per card
@@ -53,7 +53,7 @@ export default function SignalMonitor({ sku, activeScenario, onScenarioChange }:
   const signals: ScenarioSignals = sku.scenarios[activeScenario].signals;
 
   const TrendIcon = ({ trend, color }: { trend: "up" | "down" | "flat"; color: string }) => {
-    const cls = "w-3.5 h-3.5 stroke-[2.5px]";
+    const cls = "w-3 h-3 stroke-[2.5px]";
     if (trend === "up") return <TrendingUp className={cls} style={{ color }} />;
     if (trend === "down") return <TrendingDown className={cls} style={{ color }} />;
     return <Minus className={cls} style={{ color }} />;
@@ -83,7 +83,7 @@ export default function SignalMonitor({ sku, activeScenario, onScenarioChange }:
     },
     {
       id: "freight",
-      label: "Freight Volume Index",
+      label: "Freight Vol Index",
       value: signals.freight_index.toString(),
       unit: "",
       sub: "Base index 100",
@@ -104,10 +104,10 @@ export default function SignalMonitor({ sku, activeScenario, onScenarioChange }:
     },
     {
       id: "backlog",
-      label: "Customer Backlog Days",
+      label: "Customer Backlog",
       value: `${signals.backlog_days}`,
       unit: "d",
-      sub: "Rolling 30-day backlog",
+      sub: "Rolling 30-day",
       valueColor: "hsl(var(--ds-text-primary))",
       badge: null,
       sparkBar: {
@@ -153,44 +153,44 @@ export default function SignalMonitor({ sku, activeScenario, onScenarioChange }:
   ];
 
   return (
-    <section className="ds-section-card p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <section className="bg-card rounded-xl border p-5 shadow-sm mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
         <div>
-          <p className="ds-section-title">Signals</p>
-          <h2 className="text-lg font-medium text-ds-text-primary">Signal monitor</h2>
+          <p className="text-xs uppercase font-semibold tracking-wider text-muted-foreground mb-1">Signals</p>
+          <h2 className="text-xl font-bold text-foreground">Signal monitor</h2>
         </div>
-      </div>
-      {/* Scenario pills */}
-      <div className="inline-flex gap-1.5 mb-5 rounded-full border border-[hsl(var(--ds-border-subtle))] bg-white/60 p-1 backdrop-blur shadow-sm">
-        {SCENARIO_IDS.map((id) => {
-          const meta = SCENARIO_META[id];
-          const isActive = activeScenario === id;
-          return (
-            <button
-              key={id}
-              onClick={() => onScenarioChange(id)}
-              className={clsx(
-                "px-4 py-1.5 rounded-full text-sm font-medium ds-transition flex items-center gap-1.5",
-                isActive
-                  ? `${meta.bg} ${meta.border} border shadow-sm`
-                  : "bg-transparent border border-transparent text-ds-text-secondary hover:bg-white hover:shadow-sm"
-              )}
-              style={isActive ? { color: meta.color } : undefined}
-            >
-              {isActive && (
-                <span
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: meta.dot }}
-                />
-              )}
-              {meta.label}
-            </button>
-          );
-        })}
+
+        {/* Scenario Selectors */}
+        <div className="inline-flex gap-1 rounded-lg border bg-secondary/30 p-1">
+          {SCENARIO_IDS.map((id) => {
+            const meta = SCENARIO_META[id];
+            const isActive = activeScenario === id;
+            return (
+              <button
+                key={id}
+                onClick={() => onScenarioChange(id)}
+                className={clsx(
+                  "px-4 py-1.5 rounded-md text-sm font-semibold transition-all flex items-center gap-2",
+                  isActive
+                    ? "bg-white shadow-sm ring-1 ring-border text-foreground"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                )}
+              >
+                {isActive && (
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: meta.dot }}
+                  />
+                )}
+                {meta.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {cards.map((card) => {
           const Icon = CARD_ICONS[card.id];
           const isExpanded = expandedCard === card.id;
@@ -199,77 +199,66 @@ export default function SignalMonitor({ sku, activeScenario, onScenarioChange }:
             <button
               key={card.id}
               className={clsx(
-                "signal-card text-left relative overflow-hidden rounded-2xl border ds-transition w-full",
-                isExpanded && "signal-card--expanded"
+                "signal-card text-left relative overflow-hidden rounded-xl border ds-transition w-full group",
+                isExpanded ? "border-primary/30 bg-primary/[0.02]" : "hover:border-border"
               )}
               onClick={() => setExpandedCard(isExpanded ? null : card.id)}
             >
-              {/* Top gradient accent bar */}
+              {/* Top accent line */}
               <span
                 className={clsx(
-                  "absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r",
+                  "absolute inset-x-0 top-0 h-1 transition-opacity",
+                  isExpanded ? "opacity-100" : "opacity-0 group-hover:opacity-100",
                   CARD_ACCENTS[card.id]
                 )}
               />
 
               <div className="p-4 pt-5">
-                {/* Header row */}
-                <div className="flex items-start justify-between mb-3">
-                  <div
-                    className={clsx(
-                      "w-8 h-8 rounded-xl flex items-center justify-center",
-                      ICON_BKGS[card.id]
-                    )}
-                  >
+                <div className="flex items-start justify-between mb-4">
+                  <div className={clsx("w-8 h-8 rounded-lg flex items-center justify-center", ICON_BKGS[card.id])}>
                     <Icon className="w-4 h-4" />
                   </div>
                   {card.badge}
                 </div>
 
-                {/* Label */}
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-text-tertiary mb-1.5 leading-none">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                   {card.label}
                 </p>
 
-                {/* Value */}
                 <div className="flex items-baseline gap-1 mt-1">
                   <span
-                    className="text-[32px] leading-none font-bold tracking-[-0.035em] tabular-nums"
+                    className="text-3xl leading-none font-bold tracking-tight tabular-nums"
                     style={{ color: card.valueColor }}
                   >
                     {card.value}
                   </span>
                   {card.unit && (
-                    <span className="text-base font-semibold text-ds-text-tertiary">{card.unit}</span>
+                    <span className="text-base font-semibold text-muted-foreground">{card.unit}</span>
                   )}
                 </div>
 
-                {/* Spark bar (backlog) */}
+                {/* Spark bar */}
                 {card.sparkBar && (
-                  <div className="mt-3">
-                    <div className="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div className="mt-4">
+                    <div className="w-full h-1.5 rounded-full bg-secondary overflow-hidden">
                       <div
                         className="h-full rounded-full ds-transition"
-                        style={{
-                          width: `${card.sparkBar.pct}%`,
-                          backgroundColor: card.sparkBar.color,
-                        }}
+                        style={{ width: `${card.sparkBar.pct}%`, backgroundColor: card.sparkBar.color }}
                       />
                     </div>
-                    <p className="text-[10px] text-ds-text-tertiary mt-1.5 font-medium">
+                    <p className="text-[11px] text-muted-foreground mt-2 font-medium">
                       {card.sparkBar.pct.toFixed(0)}% of capacity
                     </p>
                   </div>
                 )}
 
-                {/* Sub label */}
                 {!card.sparkBar && (
-                  <p className="text-[11px] text-ds-text-secondary mt-2 font-medium">{card.sub}</p>
+                  <p className="text-[11px] text-muted-foreground mt-3 font-medium">{card.sub}</p>
                 )}
 
-                {/* Expanded explanation */}
+                {/* Details drawer */}
                 {isExpanded && (
-                  <div className="mt-3 pt-3 border-t border-dashed border-[hsl(var(--ds-border-subtle))] text-[11px] text-ds-text-secondary leading-relaxed animate-fade-in">
+                  <div className="mt-4 pt-4 border-t border-border text-xs text-muted-foreground leading-relaxed animate-in fade-in slide-in-from-top-2">
                     {SIGNAL_EXPLANATIONS[card.id]}
                   </div>
                 )}

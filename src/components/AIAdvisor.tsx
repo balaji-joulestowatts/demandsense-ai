@@ -3,6 +3,9 @@ import { Bot, Send, X, Trash2, Sparkles, FileText, Download, User } from "lucide
 import ReactMarkdown from "react-markdown";
 import { type SKUData } from "@/data/forecastData";
 import { type AdvisorMessage, type AdvisorContext, streamAdvisor } from "@/lib/advisorApi";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
+import { createRoot } from "react-dom/client";
 import clsx from "clsx";
 import { toast } from "sonner";
 
@@ -34,6 +37,90 @@ const SCENARIO_COLORS: Record<string, string> = {
   base: "bg-blue-100 text-blue-700",
   bear: "bg-amber-100 text-amber-700",
 };
+
+// ── Visualization JSON contract (model → UI) ────────────────────────────────
+type VisualizationType =
+  | "demand_trend"
+  | "scenario_compare"
+  | "pmi_sensitivity"
+  | "inventory_backlog"
+  | "freight"
+  | "cancel_rate";
+
+type VisualizationPoint = {
+  label: string;
+  value: number;
+  low?: number;
+  high?: number;
+};
+
+type VisualizationResponse = {
+  visualization: true;
+  type: VisualizationType;
+  title?: string;
+  unit?: string;
+  baseline?: { label?: string; value: number } | null;
+  data: VisualizationPoint[];
+};
+
+function parseVisualizationResponse(content: string): VisualizationResponse | null {
+  const text = content.trim();
+  if (!text) return null;
+
+  const tryParse = (candidate: string) => {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (!parsed || typeof parsed !== "object") return null;
+
+      const v = parsed as Partial<VisualizationResponse>;
+      if (v.visualization !== true) return null;
+      if (typeof v.type !== "string") return null;
+      if (!Array.isArray(v.data)) return null;
+
+      const validData = v.data.every(
+        (p) =>
+          p &&
+          typeof p === "object" &&
+          typeof (p as any).label === "string" &&
+          typeof (p as any).value === "number" &&
+          Number.isFinite((p as any).value) &&
+          (((p as any).low === undefined) || (typeof (p as any).low === "number" && Number.isFinite((p as any).low))) &&
+          (((p as any).high === undefined) || (typeof (p as any).high === "number" && Number.isFinite((p as any).high)))
+      );
+      if (!validData) return null;
+
+      const out: VisualizationResponse = {
+        visualization: true,
+        type: v.type as VisualizationType,
+        title: typeof v.title === "string" ? v.title : undefined,
+        unit: typeof v.unit === "string" ? v.unit : undefined,
+        baseline:
+          v.baseline && typeof v.baseline === "object" && typeof (v.baseline as any).value === "number" && Number.isFinite((v.baseline as any).value)
+            ? { label: typeof (v.baseline as any).label === "string" ? (v.baseline as any).label : undefined, value: (v.baseline as any).value }
+            : (v.baseline === null ? null : undefined),
+        data: v.data as VisualizationPoint[],
+      };
+      return out;
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = tryParse(text);
+  if (direct) return direct;
+
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first !== -1 && last !== -1 && last > first) {
+    const sliced = text.slice(first, last + 1);
+    const normalized = sliced
+      .replace(/\u201c|\u201d/g, '"')
+      .replace(/\u2018|\u2019/g, "'");
+    return tryParse(normalized);
+  }
+
+  return null;
+}
 
 // ── Visual tag parsing ────────────────────────────────────────────────────────
 type VisualType =
@@ -377,70 +464,595 @@ function markdownToPlainText(markdown: string): string {
     .trim();
 }
 
+function looksJsonish(content: string): boolean {
+  const t = content.trimStart();
+  if (!t) return false;
+  if (t.startsWith("{") || t.startsWith("[")) return true;
+  if (/\"response_type\"\s*:/.test(t)) return true;
+  if (/\"visualization\"\s*:/.test(t)) return true;
+  return false;
+}
+
+function humanizeAccidentalJson(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) return "";
+
+  const structured = parseStructuredResponse(trimmed);
+  if (structured) return markdownToPlainText(trimmed);
+
+  const vis = parseVisualizationResponse(trimmed);
+  if (vis) {
+    const lines: string[] = [];
+    lines.push(vis.title || "Chart");
+    lines.push(`Type: ${vis.type}${vis.unit ? ` (${vis.unit})` : ""}`);
+    if (vis.baseline && typeof vis.baseline.value === "number") {
+      lines.push(`Baseline: ${vis.baseline.label || "baseline"} ${vis.baseline.value}`);
+    }
+    const pts = vis.data.slice(0, 8);
+    if (pts.length) {
+      lines.push("", "Data:");
+      for (const p of pts) {
+        const range = (typeof p.low === "number" || typeof p.high === "number")
+          ? ` (range ${p.low ?? "-"}–${p.high ?? "-"})`
+          : "";
+        lines.push(`- ${p.label}: ${p.value}${range}`);
+      }
+    }
+    return lines.join("\n").trim();
+  }
+
+  // Best-effort extraction for partially streamed/invalid JSON
+  const pick = (re: RegExp) => {
+    const m = trimmed.match(re);
+    return m?.[1]?.trim() || "";
+  };
+  const title = pick(/\"title\"\s*:\s*\"([^\"]+)\"/i);
+  const situation = pick(/\"situation\"\s*:\s*\"([^\"]+)\"/i);
+  const risk = pick(/\"risk\"\s*:\s*\"([^\"]+)\"/i);
+
+  const actionMatches = Array.from(trimmed.matchAll(/\"action\"\s*:\s*\"([^\"]+)\"/gi))
+    .map((m) => m[1]?.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  const impactPairs = Array.from(trimmed.matchAll(/\"label\"\s*:\s*\"([^\"]+)\"\s*,\s*\"value\"\s*:\s*\"([^\"]+)\"/gi))
+    .map((m) => ({ label: m[1]?.trim(), value: m[2]?.trim() }))
+    .filter((x) => x.label && x.value)
+    .slice(0, 4);
+
+  const lines: string[] = [];
+  if (title) lines.push(title);
+  if (situation) lines.push("", `Situation: ${situation}`);
+  if (impactPairs.length) {
+    lines.push("", "Impact:");
+    for (const it of impactPairs) lines.push(`- ${it.label}: ${it.value}`);
+  }
+  if (actionMatches.length) {
+    lines.push("", "Actions:");
+    for (const a of actionMatches) lines.push(`- ${a}`);
+  }
+  if (risk) lines.push("", `Risk: ${risk}`);
+
+  if (lines.length) return lines.join("\n").trim();
+  return "I received a malformed formatted response. Please retry your question.";
+}
+
 async function downloadPdfReport({
   fileName,
   title,
-  skuName,
-  scenario,
   content,
+  sku,
+  activeScenario,
+  visualization,
 }: {
   fileName: string;
   title: string;
-  skuName: string;
-  scenario: string;
   content: string;
+  sku: SKUData;
+  activeScenario: "bull" | "base" | "bear";
+  visualization: VisualizationResponse | null;
 }) {
-  const { jsPDF } = await import("jspdf");
+  const [{ jsPDF }, html2canvas] = await Promise.all([
+    import("jspdf"),
+    import("html2canvas").then((m) => m.default),
+  ]);
+
+  // Render a styled report offscreen, screenshot it, then slice into A4 pages.
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.left = "-10000px";
+  container.style.top = "0";
+  container.style.width = "794px"; // ~A4 width at 96dpi
+  container.style.background = "#ffffff";
+  container.style.color = "#0f172a";
+  container.style.fontFamily = "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+  document.body.appendChild(container);
+
+  const root = createRoot(container);
+  root.render(
+    <ReportPdfView
+      title={title}
+      sku={sku}
+      activeScenario={activeScenario}
+      assistantContent={content}
+      visualization={visualization}
+    />
+  );
+
+  // Wait for layout / charts
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  await new Promise((r) => setTimeout(r, 50));
+
+  const canvas = await html2canvas(container, {
+    backgroundColor: "#ffffff",
+    scale: 2,
+    useCORS: true,
+  });
+
+  const imgData = canvas.toDataURL("image/png");
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 40;
-  const maxWidth = pageWidth - margin * 2;
-  let y = margin;
 
-  const addPageIfNeeded = (requiredHeight: number) => {
-    if (y + requiredHeight > pageHeight - margin) {
-      doc.addPage();
-      y = margin;
-    }
-  };
+  const imgWidth = pageWidth;
+  const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text(title, margin, y);
-  y += 20;
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  const meta = `Generated: ${new Date().toLocaleString()}   |   SKU: ${skuName}   |   Scenario: ${scenario.toUpperCase()}`;
-  const metaLines = doc.splitTextToSize(meta, maxWidth);
-  doc.text(metaLines, margin, y);
-  y += metaLines.length * 12 + 8;
-
-  doc.setDrawColor(210, 220, 235);
-  doc.line(margin, y, pageWidth - margin, y);
-  y += 14;
-
-  const plain = markdownToPlainText(content);
-  const paragraphs = plain.split("\n");
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
-
-  for (const p of paragraphs) {
-    const text = p.trim();
-    if (!text) {
-      y += 8;
-      continue;
-    }
-
-    const lines = doc.splitTextToSize(text, maxWidth);
-    addPageIfNeeded(lines.length * 14 + 8);
-    doc.text(lines, margin, y);
-    y += lines.length * 14 + 4;
+  let offsetY = 0;
+  while (offsetY < imgHeight - 1) {
+    doc.addImage(imgData, "PNG", 0, -offsetY, imgWidth, imgHeight);
+    offsetY += pageHeight;
+    if (offsetY < imgHeight - 1) doc.addPage();
   }
 
   doc.save(fileName);
+
+  root.unmount();
+  container.remove();
+}
+
+function KpiCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
+      <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 800, marginTop: 4, color: "#0f172a" }}>{value}</div>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 900, color: "#0f172a", marginBottom: 8 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function VisualizationChartStatic({ vis, height = 160 }: { vis: VisualizationResponse; height?: number }) {
+  const hasRange = vis.data.some((p) => typeof p.low === "number" || typeof p.high === "number");
+  const baselineVal = vis.baseline?.value;
+  const data = vis.data.map((p) => ({ label: p.label, value: p.value, low: p.low, high: p.high }));
+
+  const chartConfig = {
+    value: { label: "Value", color: "#2563eb" },
+    low: { label: "Low", color: "#94a3b8" },
+    high: { label: "High", color: "#94a3b8" },
+  } as const;
+
+  const isTrend = vis.type === "demand_trend";
+
+  return (
+    <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 10, background: "#ffffff" }}>
+      <div style={{ fontSize: 11, fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>{vis.title || "Chart"}</div>
+      <ChartContainer config={chartConfig} className="aspect-auto w-full" style={{ height }}>
+        {isTrend ? (
+          <LineChart data={data} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} />
+            <YAxis tickLine={false} axisLine={false} width={36} />
+            {typeof baselineVal === "number" && Number.isFinite(baselineVal) && (
+              <ReferenceLine y={baselineVal} stroke="#2563eb" strokeDasharray="4 3" />
+            )}
+            {hasRange && (
+              <>
+                <Line type="monotone" dataKey="low" stroke="var(--color-low)" strokeDasharray="4 4" dot={false} />
+                <Line type="monotone" dataKey="high" stroke="var(--color-high)" strokeDasharray="4 4" dot={false} />
+              </>
+            )}
+            <Line type="monotone" dataKey="value" stroke="var(--color-value)" strokeWidth={2} dot={false} />
+          </LineChart>
+        ) : (
+          <BarChart data={data} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} />
+            <YAxis tickLine={false} axisLine={false} width={36} />
+            {typeof baselineVal === "number" && Number.isFinite(baselineVal) && (
+              <ReferenceLine y={baselineVal} stroke="#2563eb" strokeDasharray="4 3" />
+            )}
+            <Bar dataKey="value" fill="var(--color-value)" radius={[6, 6, 0, 0]} />
+          </BarChart>
+        )}
+      </ChartContainer>
+    </div>
+  );
+}
+
+function buildDefaultVisuals(sku: SKUData, activeScenario: "bull" | "base" | "bear"): VisualizationResponse[] {
+  const scenario = sku.scenarios[activeScenario];
+  const basePmi = scenario.signals.pmi;
+  const pmiTarget = basePmi - 5;
+  const deltaPct = (pmiTarget - basePmi) * 0.8;
+  const baseW1 = scenario.forecast[0]?.demand ?? 0;
+  const projW1 = Math.max(0, Math.round(baseW1 * (1 + deltaPct / 100)));
+
+  const demandTrend: VisualizationResponse = {
+    visualization: true,
+    type: "demand_trend",
+    title: "Weekly Demand Forecast (W1–W8)",
+    unit: "units/wk",
+    baseline: { label: "commit", value: scenario.planner.production_commit },
+    data: scenario.forecast.slice(0, 8).map((w, i) => ({
+      label: `W${i + 1}`,
+      value: w.demand,
+      low: w.lower,
+      high: w.upper,
+    })),
+  };
+
+  const scenarioCompare: VisualizationResponse = {
+    visualization: true,
+    type: "scenario_compare",
+    title: "Scenario Peaks (Bull/Base/Bear)",
+    unit: "units",
+    baseline: { label: "commit", value: scenario.planner.production_commit },
+    data: [
+      { label: "Bull", value: sku.scenarios.bull.peak_demand },
+      { label: "Base", value: sku.scenarios.base.peak_demand },
+      { label: "Bear", value: sku.scenarios.bear.peak_demand },
+    ],
+  };
+
+  const inventoryBacklog: VisualizationResponse = {
+    visualization: true,
+    type: "inventory_backlog",
+    title: "Backlog vs Inventory Target",
+    unit: "days",
+    baseline: null,
+    data: [
+      { label: "Backlog", value: scenario.signals.backlog_days },
+      { label: "Target", value: scenario.planner.inventory_target_days },
+    ],
+  };
+
+  const freight: VisualizationResponse = {
+    visualization: true,
+    type: "freight",
+    title: "Freight Volume Index",
+    unit: "index",
+    baseline: { label: "base", value: 100 },
+    data: [
+      { label: "Index", value: scenario.signals.freight_index },
+      { label: "MoM %", value: scenario.signals.freight_mom_pct },
+    ],
+  };
+
+  const cancelRate: VisualizationResponse = {
+    visualization: true,
+    type: "cancel_rate",
+    title: "Order Cancel Rate (Bull/Base/Bear)",
+    unit: "%",
+    baseline: null,
+    data: [
+      { label: "Bull", value: sku.scenarios.bull.signals.cancel_rate },
+      { label: "Base", value: sku.scenarios.base.signals.cancel_rate },
+      { label: "Bear", value: sku.scenarios.bear.signals.cancel_rate },
+    ],
+  };
+
+  const pmiSensitivity: VisualizationResponse = {
+    visualization: true,
+    type: "pmi_sensitivity",
+    title: `PMI Sensitivity (W1 demand @ PMI ${basePmi.toFixed(1)} vs ${pmiTarget.toFixed(1)})`,
+    unit: "units/wk",
+    baseline: null,
+    data: [
+      { label: "Base", value: baseW1 },
+      { label: "Target", value: projW1 },
+    ],
+  };
+
+  return [demandTrend, scenarioCompare, inventoryBacklog, pmiSensitivity, freight, cancelRate];
+}
+
+function ReportPdfView({
+  title,
+  sku,
+  activeScenario,
+  assistantContent,
+  visualization,
+}: {
+  title: string;
+  sku: SKUData;
+  activeScenario: "bull" | "base" | "bear";
+  assistantContent: string;
+  visualization: VisualizationResponse | null;
+}) {
+  const scenario = sku.scenarios[activeScenario];
+  const defaultVisuals = buildDefaultVisuals(sku, activeScenario);
+
+  const statusFromGap = (gapUnits: number) => {
+    if (gapUnits >= 60) return { label: "Ramp", color: "#059669" };
+    if (gapUnits >= 15) return { label: "Increase", color: "#2563eb" };
+    if (gapUnits <= -60) return { label: "Cut", color: "#dc2626" };
+    if (gapUnits <= -15) return { label: "Reduce", color: "#d97706" };
+    return { label: "Hold", color: "#334155" };
+  };
+
+  const riskLevel = () => {
+    const pmi = scenario.signals.pmi;
+    const cancel = scenario.signals.cancel_rate;
+    const backlog = scenario.signals.backlog_days;
+    let score = 0;
+    if (pmi < 48) score += 2;
+    else if (pmi < 50) score += 1;
+    if (cancel >= 7) score += 2;
+    else if (cancel >= 4) score += 1;
+    if (backlog < 25) score += 1;
+    if (scenario.planner.alignment_confidence < 80) score += 1;
+    if (score >= 5) return { label: "High", color: "#dc2626" };
+    if (score >= 3) return { label: "Medium", color: "#d97706" };
+    return { label: "Low", color: "#059669" };
+  };
+
+  const next12 = scenario.forecast.slice(0, 12).map((w) => w.demand);
+  const avg12w = next12.length ? Math.round(next12.reduce((a, b) => a + b, 0) / next12.length) : 0;
+  const peak = scenario.peak_demand;
+  const commit = scenario.planner.production_commit;
+  const gap = avg12w - commit;
+
+  const stance = statusFromGap(gap);
+  const risk = riskLevel();
+
+  const suggestedCommit = (() => {
+    // Default to aligning to 12W average; cap to not exceed peak unless gap is large.
+    const target = avg12w;
+    if (target <= 0) return commit;
+    const capped = Math.min(target, peak);
+    // Snap to nearest 10 units for readability.
+    return Math.round(capped / 10) * 10;
+  })();
+
+  const actionPlan = {
+    days30: [] as string[],
+    days60: [] as string[],
+    days90: [] as string[],
+  };
+
+  if (gap >= 15) {
+    actionPlan.days30.push(`Increase production commit from ${commit.toLocaleString()} to ~${suggestedCommit.toLocaleString()} ${sku.unit}/wk; confirm capacity + labor.`);
+    actionPlan.days30.push(`Pull forward procurement to Week ${Math.max(1, scenario.planner.procurement_week - 1)}; lock critical components for the next 4–6 weeks.`);
+    actionPlan.days30.push(`Set exception monitoring: if cancel rate rises above ${(scenario.signals.cancel_rate + 2).toFixed(1)}%, pause further ramps.`);
+    actionPlan.days60.push(`Build buffer to ${scenario.planner.inventory_target_days} days cover; rebalance DC allocations to top demand lanes.`);
+    actionPlan.days60.push(`Run supplier risk review for freight index ${scenario.signals.freight_index}; pre-book capacity if it trends up.`);
+    actionPlan.days60.push(`Tighten S&OP cadence: weekly commit vs forecast variance + service-level impact.`);
+    actionPlan.days90.push(`Validate forecast drivers: PMI (${scenario.signals.pmi.toFixed(1)}) and backlog (${scenario.signals.backlog_days}d); revise assumptions if trend changes.`);
+    actionPlan.days90.push(`Optimize cost-to-serve: consolidate shipments and renegotiate expedited freight thresholds.`);
+    actionPlan.days90.push(`Institutionalize scenario triggers (Bull/Base/Bear) with pre-approved playbooks.`);
+  } else if (gap <= -15) {
+    actionPlan.days30.push(`Reduce production commit by ${Math.min(Math.abs(gap), Math.round(commit * 0.1))} ${sku.unit}/wk to avoid excess inventory.`);
+    actionPlan.days30.push(`Delay procurement beyond Week ${scenario.planner.procurement_week} unless lead-times require commitments.`);
+    actionPlan.days30.push(`Increase cancellation monitoring: if cancel rate stays above ${scenario.signals.cancel_rate.toFixed(1)}%, tighten order confirmation windows.`);
+    actionPlan.days60.push(`Lower inventory target by 5–10 days and prioritize sell-through; reduce slow-moving SKUs.`);
+    actionPlan.days60.push(`Review pricing / promo levers to stimulate demand without margin erosion.`);
+    actionPlan.days60.push(`Re-forecast with latest PMI/freight and validate customer backlog health.`);
+    actionPlan.days90.push(`Rebalance capacity to higher-confidence products; keep optionality via flexible labor/outsourcing.`);
+    actionPlan.days90.push(`Implement early-warning dashboard for demand reversal (PMI, cancel rate, backlog).`);
+    actionPlan.days90.push(`Negotiate supplier flexibility clauses (MOQ, reschedule windows).`);
+  } else {
+    actionPlan.days30.push(`Hold production commit at ${commit.toLocaleString()} ${sku.unit}/wk; focus on execution quality (service + cost).`);
+    actionPlan.days30.push(`Validate procurement trigger Week ${scenario.planner.procurement_week}; confirm lead-times for long-tail parts.`);
+    actionPlan.days30.push(`Tighten monitoring on cancel rate (${scenario.signals.cancel_rate.toFixed(1)}%) and freight MoM (${scenario.signals.freight_mom_pct.toFixed(1)}%).`);
+    actionPlan.days60.push(`Optimize inventory positioning toward ${scenario.planner.inventory_target_days} days cover; reduce stockouts in top lanes.`);
+    actionPlan.days60.push(`Run scenario drill: define triggers to move from ${activeScenario.toUpperCase()} → Bull/Bear.`);
+    actionPlan.days60.push(`Calibrate forecast error buffers using model accuracy (1M MAPE ${sku.model_accuracy.ensemble_mape_1m}%).`);
+    actionPlan.days90.push(`Negotiate freight and supplier terms based on volume outlook; lock rebates where possible.`);
+    actionPlan.days90.push(`Codify decision rules for commit changes (e.g., Δavg12w vs commit thresholds).`);
+    actionPlan.days90.push(`Expand signal coverage (FX, cancellations by channel) if available.`);
+  }
+
+  const narrative = markdownToPlainText(cleanContent(assistantContent));
+  const narrativeLines = narrative.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  const execBullets = [
+    `12-week average demand is ${avg12w.toLocaleString()} ${sku.unit}/wk vs commit ${commit.toLocaleString()} (${gap >= 0 ? "+" : ""}${gap.toLocaleString()} ${sku.unit}/wk).`,
+    `Peak demand is ${peak.toLocaleString()} ${sku.unit}; stance: ${stance.label} (alignment confidence ${scenario.planner.alignment_confidence}%).`,
+    `Risk level: ${risk.label} — PMI ${scenario.signals.pmi.toFixed(1)}, cancel rate ${scenario.signals.cancel_rate.toFixed(1)}%, backlog ${scenario.signals.backlog_days}d.`,
+  ];
+
+  const watchlist = [
+    `PMI trigger: <48 contraction risk; current ${scenario.signals.pmi.toFixed(1)} (${scenario.signals.pmi_trend}).`,
+    `Cancel rate trigger: >7% indicates demand reversal; current ${scenario.signals.cancel_rate.toFixed(1)}%.`,
+    `Backlog trigger: <25 days reduces demand visibility; current ${scenario.signals.backlog_days} days.`,
+    `Freight trigger: index >110 or MoM spike; current ${scenario.signals.freight_index} (${scenario.signals.freight_mom_pct >= 0 ? "+" : ""}${scenario.signals.freight_mom_pct.toFixed(1)}% MoM).`,
+  ];
+
+  const tableRows = [
+    { scenario: "Bull", peak: sku.scenarios.bull.peak_demand },
+    { scenario: "Base", peak: sku.scenarios.base.peak_demand },
+    { scenario: "Bear", peak: sku.scenarios.bear.peak_demand },
+  ].map((r) => ({
+    ...r,
+    commit,
+    gap: r.peak - commit,
+  }));
+
+  return (
+    <div style={{ padding: 26 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: -0.5 }}>{title}</div>
+          <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>
+            Generated: {new Date().toLocaleString()} &nbsp; | &nbsp; SKU: {sku.name} &nbsp; | &nbsp; Scenario: {activeScenario.toUpperCase()}
+          </div>
+        </div>
+        <div style={{ fontSize: 10, color: "#64748b", textAlign: "right" }}>
+          <div style={{ fontWeight: 800 }}>DemandSense</div>
+          <div>Prediction Studio</div>
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: "#e2e8f0", marginTop: 14 }} />
+
+      <Section title="Executive Summary">
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, background: "#ffffff" }}>
+          {execBullets.map((b, idx) => (
+            <div key={idx} style={{ display: "flex", gap: 8, marginTop: idx === 0 ? 0 : 6, fontSize: 11, lineHeight: 1.45 }}>
+              <div style={{ fontWeight: 900, color: "#2563eb" }}>•</div>
+              <div style={{ color: "#0f172a" }}>{b}</div>
+            </div>
+          ))}
+          <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ padding: "6px 10px", borderRadius: 999, background: "#f1f5f9", fontSize: 10, fontWeight: 900, color: "#334155" }}>
+              Recommended stance: <span style={{ color: stance.color }}>{stance.label}</span>
+            </div>
+            <div style={{ padding: "6px 10px", borderRadius: 999, background: "#f1f5f9", fontSize: 10, fontWeight: 900, color: "#334155" }}>
+              Risk: <span style={{ color: risk.color }}>{risk.label}</span>
+            </div>
+            <div style={{ padding: "6px 10px", borderRadius: 999, background: "#f1f5f9", fontSize: 10, fontWeight: 900, color: "#334155" }}>
+              Suggested commit: <span style={{ color: "#0f172a" }}>{suggestedCommit.toLocaleString()} {sku.unit}/wk</span>
+            </div>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Key KPIs">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          <KpiCard label="12W Avg Forecast" value={`${avg12w.toLocaleString()} ${sku.unit}/wk`} />
+          <KpiCard label="Production Commit" value={`${commit.toLocaleString()} ${sku.unit}/wk`} />
+          <KpiCard label="Gap vs Commit" value={`${gap >= 0 ? "+" : ""}${gap.toLocaleString()} ${sku.unit}/wk`} />
+          <KpiCard label="Peak Demand" value={`${peak.toLocaleString()} ${sku.unit}`} />
+          <KpiCard label="Inventory Target" value={`${scenario.planner.inventory_target_days} days`} />
+          <KpiCard label="Backlog" value={`${scenario.signals.backlog_days} days`} />
+        </div>
+      </Section>
+
+      <Section title="Planner Outputs">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          <KpiCard label="Procurement Trigger" value={`Week ${scenario.planner.procurement_week}`} />
+          <KpiCard label="Action Status" value={scenario.planner.action_status} />
+          <KpiCard label="FX Index" value={`${scenario.signals.fx_index}`} />
+        </div>
+      </Section>
+
+      <Section title="Visuals">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+          {visualization && <VisualizationChartStatic vis={visualization} height={170} />}
+          {defaultVisuals.slice(0, 4).map((v, idx) => (
+            <VisualizationChartStatic key={idx} vis={v} height={170} />
+          ))}
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+            <VisualizationChartStatic vis={defaultVisuals[4]} height={170} />
+            <VisualizationChartStatic vis={defaultVisuals[5]} height={170} />
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Scenario Comparison">
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", background: "#f1f5f9", padding: "10px 12px", fontSize: 10, fontWeight: 900, color: "#334155", textTransform: "uppercase", letterSpacing: 0.8 }}>
+            <div>Scenario</div>
+            <div>Peak</div>
+            <div>Commit</div>
+            <div>Gap</div>
+          </div>
+          {tableRows.map((r) => (
+            <div key={r.scenario} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", padding: "10px 12px", fontSize: 11, borderTop: "1px solid #e2e8f0" }}>
+              <div style={{ fontWeight: 800 }}>{r.scenario}</div>
+              <div>{r.peak.toLocaleString()}</div>
+              <div>{r.commit.toLocaleString()}</div>
+              <div style={{ color: r.gap >= 0 ? "#059669" : "#dc2626", fontWeight: 800 }}>{r.gap >= 0 ? "+" : ""}{r.gap.toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Risks & Watchlist">
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, background: "#ffffff" }}>
+          {watchlist.map((w, idx) => (
+            <div key={idx} style={{ display: "flex", gap: 8, marginTop: idx === 0 ? 0 : 6, fontSize: 11, lineHeight: 1.45 }}>
+              <div style={{ fontWeight: 900, color: "#0f172a" }}>•</div>
+              <div style={{ color: "#0f172a" }}>{w}</div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="30 / 60 / 90 Day Action Plan">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          {[
+            { k: "30 days", items: actionPlan.days30 },
+            { k: "60 days", items: actionPlan.days60 },
+            { k: "90 days", items: actionPlan.days90 },
+          ].map((col) => (
+            <div key={col.k} style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, background: "#ffffff" }}>
+              <div style={{ fontSize: 10, fontWeight: 900, color: "#334155", textTransform: "uppercase", letterSpacing: 0.8 }}>{col.k}</div>
+              <div style={{ marginTop: 8 }}>
+                {col.items.slice(0, 4).map((it, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 8, marginTop: idx === 0 ? 0 : 6, fontSize: 11, lineHeight: 1.45 }}>
+                    <div style={{ fontWeight: 900, color: "#2563eb" }}>•</div>
+                    <div style={{ color: "#0f172a" }}>{it}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Scenario Assumptions">
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, background: "#ffffff", fontSize: 11, lineHeight: 1.5 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 3fr", gap: 10 }}>
+            <div style={{ fontWeight: 900 }}>Bull</div>
+            <div style={{ color: "#0f172a" }}>{sku.scenarios.bull.assumption}</div>
+            <div style={{ fontWeight: 900 }}>Base</div>
+            <div style={{ color: "#0f172a" }}>{sku.scenarios.base.assumption}</div>
+            <div style={{ fontWeight: 900 }}>Bear</div>
+            <div style={{ color: "#0f172a" }}>{sku.scenarios.bear.assumption}</div>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Advisor Narrative (End-to-End)">
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, background: "#ffffff" }}>
+          {narrativeLines.length ? (
+            <div style={{ fontSize: 11, lineHeight: 1.45, color: "#0f172a" }}>
+              {narrativeLines.map((l, idx) => (
+                <div key={idx} style={{ marginTop: idx === 0 ? 0 : 6 }}>{l}</div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: "#475569" }}>
+              No narrative content captured.
+            </div>
+          )}
+        </div>
+      </Section>
+
+      <Section title="Signals Snapshot">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+          <KpiCard label="PMI" value={`${scenario.signals.pmi.toFixed(1)}`} />
+          <KpiCard label="Freight Index" value={`${scenario.signals.freight_index}`} />
+          <KpiCard label="Cancel Rate" value={`${scenario.signals.cancel_rate.toFixed(1)}%`} />
+          <KpiCard label="Alignment Confidence" value={`${scenario.planner.alignment_confidence}%`} />
+        </div>
+      </Section>
+
+      <div style={{ marginTop: 18, fontSize: 9, color: "#64748b" }}>
+        Notes: Visuals reflect scenario data in this session. Baselines use current production commit where applicable.
+      </div>
+    </div>
+  );
 }
 
 function getLatestUserQuestion(messages: AdvisorMessage[], assistantIndex: number): string {
@@ -467,6 +1079,70 @@ function VisualCard({ title, children }: { title: string; children: React.ReactN
       </div>
       {children}
     </div>
+  );
+}
+
+function VisualizationChart({ vis }: { vis: VisualizationResponse }) {
+  const unit = vis.unit ? ` ${vis.unit}` : "";
+  const title = vis.title || "Visualization";
+
+  const hasRange = vis.data.some((p) => typeof p.low === "number" || typeof p.high === "number");
+  const baselineVal = vis.baseline?.value;
+
+  const data = vis.data.map((p) => ({
+    label: p.label,
+    value: p.value,
+    low: p.low,
+    high: p.high,
+  }));
+
+  const chartConfig = {
+    value: { label: "Value", color: "#2563eb" },
+    low: { label: "Low", color: "#94a3b8" },
+    high: { label: "High", color: "#94a3b8" },
+  } as const;
+
+  const tooltipFormatter = (value: any) => {
+    if (typeof value === "number") return `${value.toLocaleString()}${unit}`;
+    return `${String(value)}${unit}`;
+  };
+
+  const isTrend = vis.type === "demand_trend";
+
+  return (
+    <VisualCard title={title}>
+      <ChartContainer config={chartConfig} className="aspect-auto h-44 w-full">
+        {isTrend ? (
+          <LineChart data={data} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} />
+            <YAxis tickLine={false} axisLine={false} width={36} />
+            <ChartTooltip content={<ChartTooltipContent />} formatter={tooltipFormatter as any} />
+            {typeof baselineVal === "number" && Number.isFinite(baselineVal) && (
+              <ReferenceLine y={baselineVal} stroke="#2563eb" strokeDasharray="4 3" />
+            )}
+            {hasRange && (
+              <>
+                <Line type="monotone" dataKey="low" stroke="var(--color-low)" strokeDasharray="4 4" dot={false} />
+                <Line type="monotone" dataKey="high" stroke="var(--color-high)" strokeDasharray="4 4" dot={false} />
+              </>
+            )}
+            <Line type="monotone" dataKey="value" stroke="var(--color-value)" strokeWidth={2} dot={false} />
+          </LineChart>
+        ) : (
+          <BarChart data={data} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} />
+            <YAxis tickLine={false} axisLine={false} width={36} />
+            <ChartTooltip content={<ChartTooltipContent />} formatter={tooltipFormatter as any} />
+            {typeof baselineVal === "number" && Number.isFinite(baselineVal) && (
+              <ReferenceLine y={baselineVal} stroke="#2563eb" strokeDasharray="4 3" />
+            )}
+            <Bar dataKey="value" fill="var(--color-value)" radius={[6, 6, 0, 0]} />
+          </BarChart>
+        )}
+      </ChartContainer>
+    </VisualCard>
   );
 }
 
@@ -930,22 +1606,23 @@ export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdv
   const handleGenerateReport = async () => {
     if (loading) return;
     await handleSend(
-      "Generate an executive planning report for the current SKU and active scenario. Include: Executive Summary, KPI Snapshot, Scenario Comparison table (Bull/Base/Bear with peak and gap vs commit), Key Risks, 30/60/90 day actions, and Final Recommendation. Keep it brief, concise, and decision-ready."
+      "Generate a 1-page executive demand planning report for the current SKU and active scenario.\n\nFormat rules:\n- PLAIN TEXT only (no JSON, no markdown tables).\n- Use clear section headings and bullet points.\n- Be specific and quantitative (use session numbers).\n\nRequired sections:\n1) Executive Summary (3 bullets)\n2) KPI Snapshot (6 bullets with values + units)\n3) Scenario Comparison (Bull/Base/Bear: peak, commit, gap vs commit, stance)\n4) Key Risks & Watchlist (4–6 bullets)\n5) 30/60/90 Day Action Plan (3 bullets per horizon)\n6) Final Recommendation (1–2 sentences)"
     );
   };
 
   const handleDownloadMessage = async (msg: AdvisorMessage, index: number) => {
     const cleaned = cleanContent(msg.content);
-    const readable = markdownToPlainText(cleaned);
+    const visualization = parseVisualizationResponse(cleaned);
     const ts = new Date().toISOString().slice(0, 10);
     const name = `${sku.id}-${activeScenario}-advisor-report-${ts}-${index}.pdf`;
     try {
       await downloadPdfReport({
         fileName: name,
         title: "Demand Planning Report",
-        skuName: sku.name,
-        scenario: activeScenario,
-        content: readable,
+        content: cleaned,
+        sku,
+        activeScenario,
+        visualization,
       });
       toast.success("PDF report downloaded");
     } catch {
@@ -997,9 +1674,7 @@ export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdv
                   DemandSense AI Advisor
                 </h3>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">
-                    Gemini 2.5 Flash
-                  </span>
+                 
                   <span className={clsx("text-[10px] font-medium px-1.5 py-0.5 rounded", SCENARIO_COLORS[activeScenario])}>
                     {activeScenario.charAt(0).toUpperCase() + activeScenario.slice(1)}
                   </span>
@@ -1084,19 +1759,25 @@ export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdv
 
               // ── Assistant message ──
               const cleaned = cleanContent(msg.content);
-              const { type: vtype } = parseVisualTag(msg.content);
-              const userQ = getLatestUserQuestion(messages, i);
               const structured = parseStructuredResponse(cleaned);
-              const hasLlmVisual = !!structured?.visual && ((structured.visual.data?.length ?? 0) > 0 || (structured.visual.series?.length ?? 0) > 0);
+              const visualization = parseVisualizationResponse(cleaned);
               const isReportMsg = structured?.response_type === "report";
-              const renderVisualType: VisualType = vtype === "NONE" && structured?.response_type === "analysis"
-                ? "DEMAND_TREND"
-                : vtype;
+              const userQ = getLatestUserQuestion(messages, i);
+              const userAskedReport = /\breport\b/i.test(userQ) || /\b(download|export)\b\s+\breport\b/i.test(userQ);
+              const canDownloadReport = !visualization && (isReportMsg || userAskedReport);
               const fullWithoutTable = stripScenarioTable(cleaned);
               const compact = compactContent(cleaned);
               const isExpanded = !!expandedMessages[i];
               const displayContent = structured ? fullWithoutTable : (isExpanded ? fullWithoutTable : compact);
               const canExpand = !structured && fullWithoutTable.length > compact.length + 40;
+
+              const trimmed = cleaned.trimStart();
+              const jsonish = looksJsonish(trimmed);
+              const seemsLikeStreamingVisualization =
+                !visualization && jsonish && /"visualization"\s*:\s*true/.test(trimmed);
+              const seemsLikeStreamingStructured =
+                !structured && jsonish && /"response_type"\s*:\s*"(analysis|report)"/.test(trimmed);
+              const isStreaming = loading && i === messages.length - 1;
 
               return (
                 <div key={i} className="flex justify-start gap-2">
@@ -1104,32 +1785,30 @@ export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdv
                     <Bot className="h-4 w-4" />
                   </div>
                   <div className="ds-chat-bubble text-sm leading-relaxed max-w-[90%] prose prose-sm prose-slate max-w-none break-words [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:mb-2 [&_ol]:mb-2 [&_li]:mb-0.5 [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_strong]:text-[hsl(var(--ds-text-primary))]">
-                    {structured ? (
+                    {visualization ? (
+                      <VisualizationChart vis={visualization} />
+                    ) : (isStreaming && (seemsLikeStreamingVisualization || seemsLikeStreamingStructured)) ? (
+                      <div className="text-xs text-[hsl(var(--ds-text-secondary))]">
+                        Formatting response…
+                      </div>
+                    ) : structured ? (
                       <StructuredResponseView data={structured} />
+                    ) : (!isStreaming && jsonish) ? (
+                      <ReactMarkdown>{humanizeAccidentalJson(cleaned)}</ReactMarkdown>
                     ) : (
                       <ReactMarkdown>{displayContent || "Working on it..."}</ReactMarkdown>
-                    )}
-
-                    {/* Dynamic visual — driven by [VISUAL:TYPE] tag from Gemini */}
-                    {!hasLlmVisual && (
-                      <DynamicVisuals
-                        sku={sku}
-                        activeScenario={activeScenario}
-                        visualType={renderVisualType}
-                        userQuestion={userQ}
-                      />
                     )}
 
                     {canExpand && (
                       <button
                         onClick={() => setExpandedMessages((prev) => ({ ...prev, [i]: !prev[i] }))}
-                        className="mt-2 text-xs font-medium text-[hsl(var(--ds-nav))] hover:underline"
+                        className="mt-2 text-xs text-black underline font-medium text-[hsl(var(--ds-nav))] hover:underline"
                       >
                         {isExpanded ? "Show less" : "Show details"}
                       </button>
                     )}
 
-                    {isReportMsg && (
+                    {canDownloadReport && (
                       <div className="mt-2 flex items-center gap-2">
                         <button
                           onClick={() => handleDownloadMessage(msg, i)}
@@ -1167,13 +1846,42 @@ export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdv
 
           {/* Input */}
           <div className="border-t border-[hsl(var(--ds-border-subtle))] p-3">
+            <div className="flex items-center justify-between gap-2 px-1 pb-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-semibold text-[hsl(var(--ds-text-tertiary))]">Try:</span>
+                {[
+                  { label: "Forecast next 8 weeks", text: "Show the next 8-week demand forecast and what to do." },
+                  { label: "Show chart", text: "Show a chart of W1–W8 demand trend." },
+                  { label: "Scenario compare", text: "Show a chart comparing Bull/Base/Bear peak demand vs commit." },
+                  { label: "Generate report", text: "Generate a 1-page executive planning report for this scenario." },
+                ].map((c) => (
+                  <button
+                    key={c.label}
+                    onClick={() => {
+                      setInput(c.text);
+                      requestAnimationFrame(() => {
+                        textareaRef.current?.focus();
+                        autoResize();
+                      });
+                    }}
+                    className="text-[11px] px-2.5 py-1 rounded-full border border-[hsl(var(--ds-border-subtle))] text-[hsl(var(--ds-text-secondary))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--ds-text-primary))] transition-colors"
+                    type="button"
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+              <div className="hidden sm:block text-[11px] text-[hsl(var(--ds-text-tertiary))]">
+                <span className="font-medium">Enter</span> send · <span className="font-medium">Shift+Enter</span> new line
+              </div>
+            </div>
             <div className="flex items-end gap-2">
               <textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => { setInput(e.target.value); autoResize(); }}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask about scenarios, profit, risk..."
+                placeholder="Ask about scenarios, profit, risk… (say “show chart” to get a visualization)"
                 rows={1}
                 className="flex-1 resize-none rounded-xl border border-[hsl(var(--ds-border-subtle))] bg-[hsl(var(--background))] px-3 py-2.5 text-sm text-[hsl(var(--ds-text-primary))] placeholder:text-[hsl(var(--ds-text-tertiary))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] focus:border-transparent"
               />
@@ -1193,6 +1901,14 @@ export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdv
                   <Send className="h-4 w-4" />
                 )}
               </button>
+            </div>
+            <div className="mt-2 flex items-center justify-between px-1">
+              <div className="text-[11px] text-[hsl(var(--ds-text-tertiary))]">
+                Tip: Ask for a chart explicitly to get a clean visualization payload.
+              </div>
+              <div className="text-[11px] text-[hsl(var(--ds-text-tertiary))] tabular-nums">
+                {input.trim().length}/600
+              </div>
             </div>
           </div>
         </div>
