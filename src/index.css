@@ -37,13 +37,13 @@
     --ds-text-tertiary: 210 10% 52%;
     --ds-border-subtle: 40 16% 88%;
 
-    --ds-bull: 160 65% 35%;
-    --ds-base: 217 91% 60%;
-    --ds-bear: 38 92% 50%;
+    --ds-bull: 142 76% 36%;     /* #16a34a */
+    --ds-base: 221 83% 53%;     /* #2563eb */
+    --ds-bear: 0 72% 51%;       /* #dc2626 */
     --ds-custom: 268 55% 60%;
     --ds-gold: 38 92% 50%;
-    --ds-positive: 160 65% 35%;
-    --ds-negative: 0 83% 60%;
+    --ds-positive: 142 71% 36%;
+    --ds-negative: 0 72% 51%;
     --ds-warning: 38 92% 50%;
 
     --ds-shadow-card:     0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
@@ -109,15 +109,15 @@
     --ds-border-subtle: 228 31% 26%;    /* #2D3555 */
 
     /* Scenario / chart palette */
-    --ds-bull: 163 100% 42%;            /* #00D4A0 teal */
-    --ds-base: 213 100% 65%;            /* #4D9FFF blue */
-    --ds-bear: 39 100% 56%;             /* #FFB020 amber */
+    --ds-bull: 142 76% 36%;             /* #16a34a green */
+    --ds-base: 221 83% 53%;             /* #2563eb blue */
+    --ds-bear: 0 72% 51%;               /* #dc2626 red */
     --ds-custom: 255 90% 76%;           /* #A78BFA purple */
     --ds-gold: 39 100% 56%;
 
     /* Status */
-    --ds-positive: 163 100% 42%;
-    --ds-negative: 0 100% 65%;
+    --ds-positive: 142 69% 45%;
+    --ds-negative: 0 84% 60%;
     --ds-warning: 39 100% 56%;
 
     /* Shadows */
@@ -409,9 +409,9 @@
 
   /* ── Scenario chips ── */
   .ds-chip-bull {
-    background: rgba(0,212,160,0.12);
-    color: #00D4A0;
-    border: 1px solid rgba(0,212,160,0.25);
+    background: hsl(var(--ds-bull) / 0.12);
+    color: hsl(var(--ds-bull));
+    border: 1px solid hsl(var(--ds-bull) / 0.25);
     border-radius: 9999px;
     padding: 0.15rem 0.6rem;
     font-size: 0.7rem;
@@ -419,9 +419,9 @@
   }
 
   .ds-chip-base {
-    background: rgba(77,159,255,0.12);
-    color: #4D9FFF;
-    border: 1px solid rgba(77,159,255,0.25);
+    background: hsl(var(--ds-base) / 0.12);
+    color: hsl(var(--ds-base));
+    border: 1px solid hsl(var(--ds-base) / 0.25);
     border-radius: 9999px;
     padding: 0.15rem 0.6rem;
     font-size: 0.7rem;
@@ -429,9 +429,9 @@
   }
 
   .ds-chip-bear {
-    background: rgba(255,176,32,0.12);
-    color: #FFB020;
-    border: 1px solid rgba(255,176,32,0.25);
+    background: hsl(var(--ds-bear) / 0.12);
+    color: hsl(var(--ds-bear));
+    border: 1px solid hsl(var(--ds-bear) / 0.25);
     border-radius: 9999px;
     padding: 0.15rem 0.6rem;
     font-size: 0.7rem;

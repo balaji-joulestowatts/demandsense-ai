@@ -41,9 +41,9 @@ const SUGGESTED = [
 ];
 
 const SCENARIO_COLORS: Record<string, string> = {
-  bull: "bg-emerald-100 text-emerald-700",
-  base: "bg-blue-100 text-blue-700",
-  bear: "bg-amber-100 text-amber-700",
+  bull: "bg-[hsl(var(--ds-bull)/0.12)] text-[hsl(var(--ds-bull))]",
+  base: "bg-[hsl(var(--ds-base)/0.12)] text-[hsl(var(--ds-base))]",
+  bear: "bg-[hsl(var(--ds-bear)/0.12)] text-[hsl(var(--ds-bear))]",
 };
 
 // ── Visualization JSON contract (model → UI) ────────────────────────────────

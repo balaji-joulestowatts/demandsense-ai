@@ -1,6 +1,7 @@
 import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { type SKUData } from "@/data/forecastData";
+import InfoTooltip from "./InfoTooltip";
 
 // ── Design palette ──────────────────────────────────────────────────────────
 const C = {
@@ -107,7 +108,7 @@ export default function PredictionOverview({ sku, activeScenario }: PredictionOv
 
         {/* ── Monthly Forecast hero ── */}
         <div
-          className="lg:col-span-4 relative overflow-hidden"
+          className="lg:col-span-4 relative"
           style={{
             background: "linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--ds-surface-muted)) 100%)",
             minHeight: 200,
@@ -117,27 +118,32 @@ export default function PredictionOverview({ sku, activeScenario }: PredictionOv
           }}
         >
           {/* Ambient glows */}
-          <div
-            className="absolute bottom-0 right-0 pointer-events-none"
-            style={{
-              width: 180,
-              height: 180,
-              background: "radial-gradient(circle, hsl(var(--ds-warning) / 0.18) 0%, transparent 65%)",
-              transform: "translate(35%, 35%)",
-            }}
-          />
-          <div
-            className="absolute top-3 right-8 pointer-events-none"
-            style={{
-              width: 90,
-              height: 90,
-              background: "radial-gradient(circle, hsl(var(--ds-bull) / 0.18) 0%, transparent 70%)",
-            }}
-          />
+          <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ borderRadius: 14 }}>
+            <div
+              className="absolute bottom-0 right-0"
+              style={{
+                width: 180,
+                height: 180,
+                background: "radial-gradient(circle, hsl(var(--ds-warning) / 0.18) 0%, transparent 65%)",
+                transform: "translate(35%, 35%)",
+              }}
+            />
+            <div
+              className="absolute top-3 right-8"
+              style={{
+                width: 90,
+                height: 90,
+                background: "radial-gradient(circle, hsl(var(--ds-bull) / 0.18) 0%, transparent 70%)",
+              }}
+            />
+          </div>
 
           <div className="relative z-10 p-6 h-full flex flex-col justify-between" style={{ minHeight: 200 }}>
             <div>
-              <p style={{ color: C.LABEL, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.10em", marginBottom: 12 }}>Monthly Forecast</p>
+              <div className="flex items-center gap-1.5 mb-12">
+                <p style={{ color: C.LABEL, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.10em", marginBottom: 0 }}>Monthly Forecast</p>
+                <InfoTooltip description="The total planned production commitment for this exact scenario over the next 4 weeks." />
+              </div>
               <div className="flex items-start gap-3">
                 <p style={{ fontSize: 40, fontWeight: 700, color: C.VALUE, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
                   {monthlyCommit.toLocaleString()}
@@ -227,7 +233,10 @@ export default function PredictionOverview({ sku, activeScenario }: PredictionOv
 
         {/* ── Forecast Overview KPIs ── */}
         <div className="lg:col-span-5 ds-card" style={{ padding: 20 }}>
-          <p className="ds-section-title mb-1">Forecast Overview</p>
+          <div className="flex items-center gap-1.5 mb-1">
+            <p className="ds-section-title mb-0">Forecast Overview</p>
+            <InfoTooltip description="KPIs bridging execution with planning. E.g. Confidence compares orders against actual production." />
+          </div>
           <h3 style={{ fontSize: 13, fontWeight: 700, color: C.VALUE, marginBottom: 20 }}>Key demand & supply signals</h3>
 
           <div className="grid grid-cols-2 gap-5">

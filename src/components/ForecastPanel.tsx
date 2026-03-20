@@ -1,16 +1,21 @@
 import { useState, useMemo } from "react";
-import { SlidersHorizontal, Camera, TrendingUp, BarChart2, ArrowUp } from "lucide-react";
+import { SlidersHorizontal, Camera, TrendingUp, TrendingDown, Minus, BarChart2, ArrowUp, Info } from "lucide-react";
 import {
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ReferenceLine, ResponsiveContainer, Bar, PieChart, Pie, Cell,
 } from "recharts";
 import { type SKUData, computeAdjustmentMultiplier } from "@/data/forecastData";
 import AssumptionDrawer from "./AssumptionDrawer";
+import { Tooltip as UITooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import InfoTooltip from "./InfoTooltip";
 import clsx from "clsx";
 import { toast } from "sonner";
 
 // ── Design palette ──────────────────────────────────────────────────────────
 const C = {
+  BULL: "hsl(var(--ds-bull))",
+  BASE: "hsl(var(--ds-base))",
+  BEAR: "hsl(var(--ds-bear))",
   TEAL: "hsl(var(--ds-bull))",
   AMBER: "hsl(var(--ds-warning))",
   RED: "hsl(var(--destructive))",
@@ -34,9 +39,27 @@ interface ForecastPanelProps {
 const HORIZONS = [4, 8, 13, 26, 52] as const;
 
 const SCENARIO_META: Record<string, { label: string; color: string; darkBg: string; border: string }> = {
-  bull: { label: "Bull", color: C.TEAL, darkBg: "hsl(var(--ds-bull) / 0.12)", border: "hsl(var(--ds-bull) / 0.35)" },
-  base: { label: "Base", color: C.BLUE, darkBg: "hsl(var(--ds-base) / 0.12)", border: "hsl(var(--ds-base) / 0.35)" },
-  bear: { label: "Bear", color: C.AMBER, darkBg: "hsl(var(--ds-warning) / 0.12)", border: "hsl(var(--ds-warning) / 0.35)" },
+  bull: { label: "Bull", color: C.BULL, darkBg: "hsl(var(--ds-bull) / 0.12)", border: "hsl(var(--ds-bull) / 0.35)" },
+  base: { label: "Base", color: C.BASE, darkBg: "hsl(var(--ds-base) / 0.12)", border: "hsl(var(--ds-base) / 0.35)" },
+  bear: { label: "Bear", color: C.BEAR, darkBg: "hsl(var(--ds-bear) / 0.12)", border: "hsl(var(--ds-bear) / 0.35)" },
+};
+
+const SCENARIO_TOOLTIP: Record<string, string> = {
+  bull: "Upside scenario — assumes strong PMI, tight freight, and accelerating backlogs. Plan for higher inventory buffers and pre-position safety stock to capture demand.",
+  base: "Most-likely trajectory based on current signal trends. Used as the default for replenishment planning, budget allocation, and standard ops targets.",
+  bear: "Downside scenario — assumes macro deterioration, rising cancellations, and FX headwinds. Use this to stress-test your inventory plan and set floor reorder levels.",
+};
+
+const SCENARIO_ICON: Record<string, React.ElementType> = {
+  bull: TrendingUp,
+  base: Minus,
+  bear: TrendingDown,
+};
+
+const SCENARIO_STORY: Record<string, string> = {
+  bull: "Strong demand expansion detected. Freight tightening and backlog growth signal an upswing. Pre-build inventory now to capture upside without a supply gap.",
+  base: "Stable macro conditions with predictable demand. Current inventory plan holds. Monitor PMI and cancel rates weekly for early scenario shifts.",
+  bear: "Macro headwinds and rising cancellations signal demand softening. Delay discretionary POs, protect cash flow, and reduce safety stock targets.",
 };
 
 // ── Custom dark tooltip ──────────────────────────────────────────────────────
@@ -183,7 +206,10 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
       <div className="flex items-start justify-between gap-4 mb-1">
         <div>
           <p className="ds-section-title mb-1">Scenario Forecast</p>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: C.VALUE, lineHeight: 1.2 }}>Demand Outlook</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: C.VALUE, lineHeight: 1.2 }} className="flex items-center">
+            Demand Outlook
+            <InfoTooltip description="Three demand trajectories based on macro signal combinations. Bull (1,520 peak): PMI > 54, freight tight. Base (1,210 peak): stable conditions. Bear (870 peak): PMI < 48, rising cancellations. The active scenario drives all procurement recommendations below." />
+          </h2>
           <p style={{ fontSize: 12, color: C.LABEL, marginTop: 4 }}>Historical actuals vs scenario-weighted ML forecast</p>
         </div>
         <button
@@ -200,37 +226,77 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
       <div className="ds-section-divider mt-4" />
 
       {/* Scenario cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        {(["bull", "base", "bear"] as const).map((id) => {
-          const scenario = sku.scenarios[id];
-          const meta     = SCENARIO_META[id];
-          const isActive = activeScenarios.has(id);
-          return (
-            <button
-              key={id}
-              onClick={() => toggleScenario(id)}
-              className="text-left rounded-[14px] border-l-4 ds-transition relative"
-              style={{
-                padding: "16px 18px",
-                borderLeftColor: isActive ? meta.color : C.BORDER,
-                background: isActive ? meta.darkBg : "transparent",
-                border: `1px solid ${isActive ? meta.border : C.BORDER}`,
-                borderLeft: `4px solid ${isActive ? meta.color : C.BORDER}`,
-                opacity: isActive ? 1 : 0.6,
-              }}
-            >
-              {isActive && (
-                <span className="absolute top-3 right-3 w-2 h-2 rounded-full" style={{ backgroundColor: meta.color }} />
-              )}
-              <p style={{ fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: meta.color }}>{scenario.label}</p>
-              <p style={{ fontSize: 12, color: C.BODY, marginTop: 6, lineHeight: 1.5 }}>{scenario.description}</p>
-              <p style={{ fontSize: 13, fontWeight: 600, color: C.VALUE, marginTop: 8, fontVariantNumeric: "tabular-nums" }}>
-                {scenario.peak_demand.toLocaleString()} <span style={{ fontWeight: 400, color: C.LABEL, fontSize: 11 }}>{sku.unit} peak</span>
-              </p>
-            </button>
-          );
-        })}
-      </div>
+      <TooltipProvider delayDuration={200}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {(["bull", "base", "bear"] as const).map((id) => {
+            const scenario = sku.scenarios[id];
+            const meta     = SCENARIO_META[id];
+            const isActive = activeScenarios.has(id);
+            const ScenarioIcon = SCENARIO_ICON[id];
+            return (
+              <button
+                key={id}
+                onClick={() => toggleScenario(id)}
+                className="text-left rounded-[14px] ds-transition relative"
+                style={{
+                  padding: "16px 18px",
+                  background: isActive ? meta.darkBg : "transparent",
+                  border: `1px solid ${isActive ? meta.border : C.BORDER}`,
+                  borderLeft: `4px solid ${isActive ? meta.color : C.BORDER}`,
+                  opacity: isActive ? 1 : 0.55,
+                }}
+              >
+                {/* Header row: icon + label + active dot + info */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <ScenarioIcon style={{ width: 14, height: 14, color: meta.color, flexShrink: 0 }} />
+                    <p style={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.07em", color: meta.color }}>
+                      {scenario.label}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    {isActive && (
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: meta.color }} />
+                    )}
+                    <UITooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help">
+                          <Info style={{ width: 12, height: 12, color: C.LABEL }} />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-[220px] text-xs leading-relaxed">
+                        {SCENARIO_TOOLTIP[id]}
+                      </TooltipContent>
+                    </UITooltip>
+                  </div>
+                </div>
+
+                {/* Storytelling description */}
+                <p style={{ fontSize: 12, color: C.BODY, lineHeight: 1.55 }}>{SCENARIO_STORY[id]}</p>
+
+                {/* Key signals / assumption */}
+                <div style={{
+                  marginTop: 10, padding: "6px 9px",
+                  background: "rgba(255,255,255,0.04)",
+                  borderRadius: 7,
+                  borderLeft: `2px solid ${meta.color}`,
+                }}>
+                  <p style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: C.LABEL, marginBottom: 2 }}>
+                    Key signals
+                  </p>
+                  <p style={{ fontSize: 11, color: C.BODY, lineHeight: 1.45 }}>{scenario.assumption}</p>
+                </div>
+
+                {/* Peak demand */}
+                <p style={{ fontSize: 13, fontWeight: 600, color: C.VALUE, marginTop: 10, fontVariantNumeric: "tabular-nums" }}>
+                  {scenario.peak_demand.toLocaleString()}{" "}
+                  <span style={{ fontWeight: 400, color: C.LABEL, fontSize: 11 }}>{sku.unit} peak</span>
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </TooltipProvider>
 
       {/* Controls row */}
       <div className="flex flex-wrap items-center gap-3 mb-5">
@@ -332,8 +398,8 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
                 />
                 <Bar
                   dataKey="forecast"
-                  fill={C.AMBER}
-                  fillOpacity={0.75}
+                  fill={C.BLUE}
+                  fillOpacity={0.8}
                   radius={[3, 3, 0, 0]}
                   barSize={10}
                   name="Base Forecast"
@@ -424,7 +490,7 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
                   Historical Actual
                 </div>
                 <div className="flex items-center gap-2" style={{ fontSize: 11, color: C.LABEL }}>
-                  <span style={{ width: 12, height: 10, borderRadius: 2, background: C.AMBER, opacity: 0.75, display: "inline-block" }} />
+                  <span style={{ width: 12, height: 10, borderRadius: 2, background: C.BLUE, opacity: 0.8, display: "inline-block" }} />
                   Base Forecast
                 </div>
                 <div className="flex items-center gap-2 ml-auto" style={{ fontSize: 11, color: C.LABEL }}>
@@ -459,8 +525,16 @@ export default function ForecastPanel({ sku }: ForecastPanelProps) {
 
         {/* ── Accuracy Gauge card ── */}
         <div className="xl:col-span-3 ds-card flex flex-col" style={{ padding: 24 }}>
-          <p className="ds-section-title mb-1">Model Accuracy</p>
-          <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE, marginBottom: 16 }}>ML vs Baseline</h3>
+          <div className="mb-4">
+            <p className="ds-section-title mb-1">Model Accuracy</p>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE }} className="flex items-center gap-1.5">
+              ML vs Baseline
+              <InfoTooltip description="The ML ensemble (GBM + LSTM) outperforms a naive baseline forecast. MAPE 1W = 4.2% means forecasts are within ±4.2% of actuals." />
+            </h3>
+            <p className="text-[12px] text-ds-text-secondary truncate mt-1">
+              AI consistently outperforms the legacy moving average.
+            </p>
+          </div>
 
           <div className="flex justify-center">
             <AccuracyGauge improvementPct={acc.overall_improvement_pct} />

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { type SKUData } from "@/data/forecastData";
 import { computeReorderRows } from "@/lib/supplyAnalytics";
 import type { AIAdvisorHandle } from "@/components/AIAdvisor";
+import InfoTooltip from "./InfoTooltip";
 import clsx from "clsx";
 
 export default function AgentBriefing({
@@ -102,7 +103,10 @@ export default function AgentBriefing({
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <p className="text-xs uppercase font-semibold tracking-widest text-muted-foreground mb-0.5">Control tower</p>
-          <h2 className="text-lg font-bold text-foreground">Inventory & Supply Briefing</h2>
+          <h2 className="text-lg font-bold text-foreground flex items-center">
+            Inventory & Supply Briefing
+            <InfoTooltip description="On-hand inventory minus allocated units. 38,900 net with 400 allocated means 38,500 freely available. Compare against 'Required This Month' (35,840) to judge if you're covered without new POs." />
+          </h2>
           <p className="text-xs text-ds-text-secondary mt-1">
             A scenario-aware view for <span className="font-semibold">{scenario.label}</span> combining net inventory, inbound POs, and BOM requirements.
           </p>
@@ -126,35 +130,40 @@ export default function AgentBriefing({
                 label: "Current net stock",
                 value: supplySummary.totalNetNow.toLocaleString(),
                 sub: `On hand ${supplySummary.totalOnHand.toLocaleString()} · Alloc ${supplySummary.totalAllocated.toLocaleString()}`,
+                tooltip: "On-hand inventory minus allocated units. 38,900 net with 400 allocated means 38,500 freely available. Compare against 'Required This Month' (35,840) to judge if you're covered without new POs.",
               },
               {
                 icon: TrendingDown,
                 label: "Required (this week)",
                 value: supplySummary.requiredW1.toLocaleString(),
                 sub: `${scenario.planner.production_commit.toLocaleString()} ${sku.unit}/wk × BOM`,
+                tooltip: "Units needed this week = weekly run rate × BOM multiplier. If Net Now is below this number for any component, you face an immediate stockout risk.",
               },
               {
                 icon: TrendingDown,
                 label: "Required (this month)",
                 value: supplySummary.required4w.toLocaleString(),
                 sub: `${monthWeeks} weeks consumption`,
+                tooltip: "Total monthly consumption. Keep your net inventory above this line to ensure no month-end surprises.",
               },
-              { icon: Truck, label: "Inbound next week", value: supplySummary.inboundW1.toLocaleString(), sub: "From open POs (W1)" },
-              { icon: Truck, label: "Inbound next 4 weeks", value: supplySummary.inbound4w.toLocaleString(), sub: "From open POs (W1–W4)" },
+              { icon: Truck, label: "Inbound next week", value: supplySummary.inboundW1.toLocaleString(), sub: "From open POs (W1)", tooltip: "Material physically arriving in the next 7 days." },
+              { icon: Truck, label: "Inbound next 4 weeks", value: supplySummary.inbound4w.toLocaleString(), sub: "From open POs (W1–W4)", tooltip: "Confirmed inbound POs arriving over the next month." },
               {
                 icon: AlertTriangle,
                 label: "Net end of month",
                 value: supplySummary.netEnd4w.toLocaleString(),
                 sub: `Vs safety ${supplySummary.netVsSafety4w >= 0 ? "+" : ""}${supplySummary.netVsSafety4w.toLocaleString()}`,
                 tone: supplySummary.netVsSafety4w < 0 ? "bad" : "ok",
+                tooltip: "Projected inventory at month-end after fulfilling all demand. 18,060 is BELOW safety stock of 25,300 (vs safety: -7,240). This is an At Risk flag — you must place orders now to avoid a stockout before month end.",
               },
               {
                 icon: ListChecks,
                 label: "Stockout risks",
                 value: supplySummary.stockoutParts.toLocaleString(),
                 sub: `Earliest ${supplySummary.earliestStockoutWeek ? `W${supplySummary.earliestStockoutWeek}` : "—"}`,
+                tooltip: "Number of SKUs/components projected to hit zero inventory before the planning horizon ends. Each stockout can halt production. Earliest risk is Week 1 — immediate procurement action required.",
               },
-            ].map(({ icon: Icon, label, value, sub, tone }) => (
+            ].map(({ icon: Icon, label, value, sub, tone, tooltip }) => (
               <div key={label} className="ds-kpi-card border border-border/70 p-5">
                 <div className="flex items-center justify-between gap-3">
                   <div className="ds-mini-icon">
@@ -166,7 +175,10 @@ export default function AgentBriefing({
                     </Badge>
                   ) : null}
                 </div>
-                <p className="ds-kpi-label mt-3 mb-1">{label}</p>
+                <p className="ds-kpi-label mt-3 mb-1 flex items-center">
+                  {label}
+                  {tooltip && <InfoTooltip description={tooltip} />}
+                </p>
                 <p className={clsx("text-2xl font-bold tabular-nums tracking-tight", tone === "bad" && "text-destructive")}>{value}</p>
                 <p className="ds-kpi-sub mt-2">{sub}</p>
               </div>
@@ -180,7 +192,10 @@ export default function AgentBriefing({
                   <ListChecks className="w-4 h-4 text-ds-text-tertiary" />
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wider text-ds-text-tertiary">Priority list</p>
-                    <h3 className="font-semibold text-ds-text-primary">Top parts at risk (what breaks first)</h3>
+                    <h3 className="font-semibold text-ds-text-primary flex items-center">
+                      Top parts at risk (what breaks first)
+                      <InfoTooltip description="Parts ranked by proximity to stockout. 'Act Now' means the projected net inventory hits zero within 1–3 weeks. Order qty shown is MOQ-rounded. Stockout week indicates the last safe window to place a PO before a line stoppage." />
+                    </h3>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -258,14 +273,23 @@ export default function AgentBriefing({
               </div>
             </div>
 
-            <div className="ds-card p-6 xl:col-span-5">
-              <div className="flex items-center gap-2 mb-4">
-                <Bot className="w-4 h-4 text-ds-text-tertiary" />
+            <div className="ds-card p-6 xl:col-span-5 flex flex-col">
+              <div className="flex items-center gap-2 mb-2">
+                <Bot className="w-5 h-5 text-ds-text-tertiary" />
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-ds-text-tertiary">Agent</p>
-                  <h3 className="font-semibold text-ds-text-primary">Actions & deep dives</h3>
+                  <h3 className="font-semibold text-ds-text-primary text-base flex items-center gap-1.5">
+                    Actions & deep dives
+                    <InfoTooltip description="The generative AI Supply Chain Agent. Use it for ad-hoc natural language data analysis, summarizing component risks, or exporting automated PDF executive reports directly for your S&OP meetings." />
+                  </h3>
                 </div>
               </div>
+              
+              <p className="text-[13px] text-ds-text-secondary mb-5 leading-relaxed">
+                This powerful AI assistant automates your routine analysis and answers complex supply queries. 
+                Instead of crunching spreadsheets, you can instruct the agent to instantly map out the top 5 constrained 
+                parts, outline their financial impact, or synthesize a multi-week procurement strategy.
+              </p>
 
               <div className="grid grid-cols-1 gap-2.5">
                 <button

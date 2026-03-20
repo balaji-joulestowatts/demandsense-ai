@@ -2,10 +2,14 @@ import { TrendingUp, TrendingDown, Minus, Activity, Package, Clock, XCircle } fr
 import { useState } from "react";
 import { type SKUData, type ScenarioSignals } from "@/data/forecastData";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
+import InfoTooltip from "./InfoTooltip";
 import clsx from "clsx";
 
 // ── Design palette ──────────────────────────────────────────────────────────
 const C = {
+  BULL: "hsl(var(--ds-bull))",
+  BASE: "hsl(var(--ds-base))",
+  BEAR: "hsl(var(--ds-bear))",
   TEAL: "hsl(var(--ds-bull))",
   AMBER: "hsl(var(--ds-warning))",
   RED: "hsl(var(--destructive))",
@@ -28,9 +32,9 @@ interface SignalMonitorProps {
 
 const SCENARIO_IDS = ["bull", "base", "bear"] as const;
 const SCENARIO_META: Record<string, { label: string; color: string }> = {
-  bull: { label: "Bull",  color: C.TEAL },
-  base: { label: "Base",  color: C.BLUE },
-  bear: { label: "Bear",  color: C.AMBER },
+  bull: { label: "Bull",  color: C.BULL },
+  base: { label: "Base",  color: C.BASE },
+  bear: { label: "Bear",  color: C.BEAR },
 };
 
 const SIGNAL_EXPLANATIONS: Record<string, string> = {
@@ -38,6 +42,13 @@ const SIGNAL_EXPLANATIONS: Record<string, string> = {
   freight: "Coincident indicator of logistics capacity. Rising index signals demand-driven freight tightening and potential supply constraints.",
   backlog: "Coincident indicator of near-term order visibility. High backlog gives strong 4–6 week forecast confidence.",
   cancel:  "Demand reversal signal. Spikes in cancel rate precede actual demand drops by 2–4 weeks.",
+};
+
+const SIGNAL_TOOLTIPS: Record<string, string> = {
+  pmi:     "PMI > 50 = manufacturing expansion. At 51.3, demand signals are moderately bullish. This feeds directly into the Bull scenario weight. A PMI drop below 48 would trigger a Bear scenario re-weighting.",
+  freight: "Freight volumes at 104 (base = 100) indicate slightly elevated shipping demand. Rising freight often precedes demand spikes by 2–4 weeks. Combined with PMI, this is supporting the Base scenario probability.",
+  backlog: "Average days of unfulfilled customer orders. 38 days at 54% capacity is a moderate backlog. If this crosses 45 days, it signals demand is outpacing supply — a leading indicator to shift weight toward Bull scenario.",
+  cancel:  "Percentage of orders cancelled in the current period. 3.2% is moderate risk. Above 5% historically correlates with demand contraction and Bear scenario activation. Watch this weekly.",
 };
 
 const CARD_ICONS: Record<string, React.ElementType> = {
@@ -178,9 +189,12 @@ export default function SignalMonitor({ sku, activeScenario, onScenarioChange }:
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-1">
         <div>
-          <p className="ds-section-title mb-1">Signals</p>
+          <div className="flex items-center gap-1.5 mb-1">
+            <p className="ds-section-title mb-0">Signals</p>
+            <InfoTooltip description="Real-time leading indicators that drive the demand forecast. Green signals push toward the Bull scenario, while red signals push toward Bear." />
+          </div>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: C.VALUE }}>Signal Monitor</h2>
-          <p style={{ fontSize: 12, color: C.LABEL, marginTop: 4 }}>Real-time market indicators driving scenario weights</p>
+          <p className="line-clamp-1 truncate" style={{ fontSize: 12, color: C.LABEL, marginTop: 4 }}>Real-time market indicators driving scenario weights</p>
         </div>
 
         {/* Scenario selector */}
@@ -197,11 +211,11 @@ export default function SignalMonitor({ sku, activeScenario, onScenarioChange }:
                   isActive
                     ? {
                       background:
-                        meta.color === C.TEAL
+                        id === "bull"
                           ? "hsl(var(--ds-bull) / 0.2)"
-                          : meta.color === C.BLUE
+                          : id === "base"
                             ? "hsl(var(--ds-base) / 0.2)"
-                            : "hsl(var(--ds-warning) / 0.2)",
+                            : "hsl(var(--ds-bear) / 0.2)",
                       color: meta.color,
                       border: `1px solid ${meta.color}40`,
                     }
@@ -250,8 +264,9 @@ export default function SignalMonitor({ sku, activeScenario, onScenarioChange }:
                 </div>
 
                 {/* Label */}
-                <p style={{ fontSize: 10, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em", color: C.LABEL, marginBottom: 4 }}>
+                <p style={{ fontSize: 10, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em", color: C.LABEL, marginBottom: 4 }} className="flex items-center">
                   {card.label}
+                  <InfoTooltip description={SIGNAL_TOOLTIPS[card.id]} />
                 </p>
 
                 {/* Value + sparkline row */}

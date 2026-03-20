@@ -3,6 +3,7 @@ import {
   Factory, Package, Calendar, Truck, ClipboardList, ChartColumn,
   ShieldAlert, RefreshCw, ArrowDownToLine, ReceiptText,
 } from "lucide-react";
+import InfoTooltip from "./InfoTooltip";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type SKUData, type Scenario } from "@/data/forecastData";
@@ -22,6 +23,9 @@ import clsx from "clsx";
 
 // ── Design palette ──────────────────────────────────────────────────────────
 const C = {
+  BULL: "hsl(var(--ds-bull))",
+  BASE: "hsl(var(--ds-base))",
+  BEAR: "hsl(var(--ds-bear))",
   TEAL: "hsl(var(--ds-bull))",
   AMBER: "hsl(var(--ds-warning))",
   RED: "hsl(var(--destructive))",
@@ -96,9 +100,9 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; border: string }
 };
 
 const SCENARIO_COLORS: Record<string, string> = {
-  bull: C.AMBER,
-  base: C.TEAL,
-  bear: C.SLATE,
+  bull: C.BULL,
+  base: C.BASE,
+  bear: C.BEAR,
 };
 
 // ── Confidence bar ───────────────────────────────────────────────────────────
@@ -116,11 +120,18 @@ function ConfidenceBar({ value }: { value: number }) {
   );
 }
 
+const SCENARIO_STORY: Record<string, string> = {
+  bull: "Strong demand expansion detected. Freight tightening and backlog growth signal an upswing. Pre-build inventory now to capture upside without a supply gap.",
+  base: "Stable macro conditions with predictable demand. Current inventory plan holds. Monitor PMI and cancel rates weekly for early scenario shifts.",
+  bear: "Macro headwinds and rising cancellations signal demand softening. Delay discretionary POs, protect cash flow, and reduce safety stock targets.",
+};
+
 // ── Scenario card ────────────────────────────────────────────────────────────
 function ScenarioCard({ scenario }: { scenario: Scenario }) {
   const status = STATUS_STYLES[scenario.planner.action_status];
   const color = SCENARIO_COLORS[scenario.id];
   const p = scenario.planner;
+  const story = SCENARIO_STORY[scenario.id];
 
   return (
     <div
@@ -147,6 +158,9 @@ function ScenarioCard({ scenario }: { scenario: Scenario }) {
           {scenario.planner.action_status}
         </span>
       </div>
+      {story && (
+        <p style={{ fontSize: 12, color: C.BODY, lineHeight: 1.55, marginTop: -8 }}>{story}</p>
+      )}
 
       <div className="grid grid-cols-1 gap-3">
         {[
@@ -191,11 +205,14 @@ function ScenarioCard({ scenario }: { scenario: Scenario }) {
 }
 
 // ── Section header helper ────────────────────────────────────────────────────
-function SectionHeader({ label, title, sub }: { label: string; title: string; sub?: string }) {
+function SectionHeader({ label, title, sub, tooltip }: { label: string; title: string; sub?: string; tooltip?: string }) {
   return (
     <div style={{ marginBottom: 20 }}>
       <p style={{ fontSize: 10, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em", color: C.LABEL, marginBottom: 4 }}>{label}</p>
-      <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE, lineHeight: 1.3 }}>{title}</h3>
+      <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE, lineHeight: 1.3 }} className="flex items-center">
+        {title}
+        {tooltip && <InfoTooltip description={tooltip} />}
+      </h3>
       {sub && <p style={{ fontSize: 12, color: C.LABEL, marginTop: 4 }}>{sub}</p>}
       <div style={{ height: 1, background: `linear-gradient(90deg, rgba(0,212,160,0.18), transparent 60%)`, marginTop: 12 }} />
     </div>
@@ -375,7 +392,10 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
       <div className="flex flex-wrap items-start justify-between gap-4 mb-1">
         <div>
           <p className="ds-section-title mb-1">Planner Alignment</p>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: C.VALUE }}>Scenario Comparison</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: C.VALUE }} className="flex items-center">
+            Scenario Comparison
+            <InfoTooltip description="The units-per-week your production line should plan for under each scenario. ACT NOW on Bull (1,350/wk) if you want to pre-position for upside. WATCH Base (1,120/wk) is the recommended default. HOLD on Bear (880/wk) conserves inventory but risks stockouts if demand recovers." />
+          </h2>
           <p style={{ fontSize: 12, color: C.LABEL, marginTop: 4 }}>
             Parts-level restock details reflect the active scenario: <span style={{ fontWeight: 600, color: C.VALUE }}>{scenario.label}</span>
           </p>
@@ -400,23 +420,26 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
           {/* ── KPI strip ── */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(155px, 1fr))", gap: 12 }}>
             {[
-              { icon: ShieldAlert,     iconColor: C.AMBER, iconBg: "hsl(var(--ds-warning) / 0.12)", label: "Below Safety", value: supplyKpis.belowSafetyCount, sub: `Parts at risk · ${horizonWeeks}w`, danger: supplyKpis.belowSafetyCount > 0 },
-              { icon: RefreshCw,       iconColor: C.BLUE,  iconBg: "hsl(var(--ds-base) / 0.12)", label: "Reorders", value: supplyKpis.reorderCount, sub: "MOQ/multiple sized", danger: false },
-              { icon: ArrowDownToLine, iconColor: C.TEAL,  iconBg: "hsl(var(--ds-bull) / 0.12)", label: "Inbound Qty", value: supplyKpis.inboundQtyHorizon.toLocaleString(), sub: `Arriving in ${horizonWeeks}w`, danger: false },
-              { icon: ReceiptText,     iconColor: C.LABEL, iconBg: "hsl(var(--ds-text-tertiary) / 0.12)", label: "POs Arriving", value: supplyKpis.arrivingPoCount, sub: `Open POs · ${horizonWeeks}w`, danger: false },
-            ].map(({ icon: Icon, iconColor, iconBg, label, value, sub, danger }) => (
+              { icon: ShieldAlert,     iconColor: C.AMBER, iconBg: "hsl(var(--ds-warning) / 0.12)", label: "Below Safety", value: supplyKpis.belowSafetyCount, sub: `Parts at risk · ${horizonWeeks}w`, danger: supplyKpis.belowSafetyCount > 0, tooltip: "Count of SKUs falling below their minimum required buffer stock within the horizon." },
+              { icon: RefreshCw,       iconColor: C.BLUE,  iconBg: "hsl(var(--ds-base) / 0.12)", label: "Reorders", value: supplyKpis.reorderCount, sub: "MOQ/multiple sized", danger: false, tooltip: "Total components requiring immediate purchase orders to prevent stockouts." },
+              { icon: ArrowDownToLine, iconColor: C.TEAL,  iconBg: "hsl(var(--ds-bull) / 0.12)", label: "Inbound Qty", value: supplyKpis.inboundQtyHorizon.toLocaleString(), sub: `Arriving in ${horizonWeeks}w`, danger: false, tooltip: "Total confirmed units arriving from suppliers per open purchase orders." },
+              { icon: ReceiptText,     iconColor: C.LABEL, iconBg: "hsl(var(--ds-text-tertiary) / 0.12)", label: "POs Arriving", value: supplyKpis.arrivingPoCount, sub: `Open POs · ${horizonWeeks}w`, danger: false, tooltip: "Number of active Purchase Orders expected to be received within the horizon." },
+            ].map(({ icon: Icon, iconColor, iconBg, label, value, sub, danger, tooltip }) => (
               <div key={label} className="ds-kpi-card" style={{ borderLeft: danger ? `3px solid ${C.AMBER}` : undefined }}>
                 <div className="flex items-start justify-between">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: iconBg }}>
                     <Icon className="w-4 h-4" style={{ color: iconColor }} />
                   </div>
-                  {danger && (
-                    <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 9999, background: "hsl(var(--ds-warning) / 0.15)", color: C.AMBER, border: `1px solid hsl(var(--ds-warning) / 0.35)` }}>Watch</span>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {danger && (
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 9999, background: "hsl(var(--ds-warning) / 0.15)", color: C.AMBER, border: `1px solid hsl(var(--ds-warning) / 0.35)` }}>Watch</span>
+                    )}
+                    <InfoTooltip description={tooltip} />
+                  </div>
                 </div>
                 <p className="ds-kpi-label">{label}</p>
                 <p style={{ fontSize: 24, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: danger ? C.AMBER : C.VALUE }}>{value}</p>
-                <p className="ds-kpi-sub">{sub}</p>
+                <p className="ds-kpi-sub line-clamp-1">{sub}</p>
               </div>
             ))}
           </div>
@@ -426,7 +449,7 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
 
             {/* ⑤ Weeks of Cover — Horizontal BarChart */}
             <div className="ds-card xl:col-span-8" style={{ padding: 24 }}>
-              <SectionHeader label="Supply Control Tower" title="Supply Coverage Health" sub="Weeks of cover by component vs safety threshold" />
+              <SectionHeader label="Supply Control Tower" title="Supply Coverage Health" sub="Weeks of cover by component vs safety threshold" tooltip="Weeks of inventory cover per component vs the safety stock threshold (dashed line). Red bars are BELOW safety — Crystal Oscillator at 0.7w means less than 1 week of cover. Order immediately. Green bars above the line are safe." />
               {coverByPartData.length === 0 ? (
                 <p style={{ fontSize: 13, color: C.LABEL }}>No cover data available.</p>
               ) : (
@@ -498,6 +521,7 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
                 label="Most Constrained Component"
                 title="Projected Inventory Trajectory"
                 sub={criticalPartProjection ? `${criticalPartProjection.partName} · ${criticalPartProjection.partId}` : undefined}
+                tooltip="Week-by-week inventory projection including inbound POs. The line going below zero means a stockout in that week. The safety threshold (dashed orange) is the minimum buffer you must maintain. Inbound bars (blue) show when open POs will arrive."
               />
               {criticalPartProjection ? (
                 <ResponsiveContainer width="100%" height={240}>
@@ -573,6 +597,7 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
                 label="Inventory vs Requirement"
                 title="Can we cover the next 4 weeks of demand?"
                 sub="Available (on hand + inbound) vs what will be consumed. If amber exceeds teal, you need to act."
+                tooltip="Green bars = Available (on-hand + inbound). Orange bars = Required demand over 4 weeks. When orange exceeds green, you CANNOT cover demand — place a purchase order for that component immediately."
               />
               {inventoryVsRequirement4w.length === 0 ? (
                 <p style={{ fontSize: 13, color: C.LABEL }}>No inventory data available.</p>
@@ -646,9 +671,9 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
             </div>
 
             {/* ⑦ Recommended Orders */}
-            <div className="xl:col-span-6 overflow-hidden" style={{ background: C.CARD, border: `1px solid ${C.BORDER}`, borderRadius: 14, boxShadow: "var(--ds-shadow-card)" }}>
+            <div className="xl:col-span-6" style={{ background: C.CARD, border: `1px solid ${C.BORDER}`, borderRadius: 14, boxShadow: "var(--ds-shadow-card)" }}>
               <div style={{ padding: "24px 24px 16px 24px" }}>
-                <SectionHeader label="Procurement Action" title="Recommended Orders" sub="Ranked by urgency · sized to MOQ" />
+                <SectionHeader label="Procurement Action" title="Recommended Orders" sub="Ranked by urgency · sized to MOQ" tooltip="MOQ-rounded order quantities ranked by urgency (earliest stockout first). DRAM 8Gb needs 9,500 units most urgently (Stockout W5). Total 34,400 units across 6 parts must be ordered within this week to meet the 8-week safety horizon." />
                 {recommendedOrderChartData.length === 0 ? (
                   <p style={{ fontSize: 13, color: C.LABEL }}>No recommended orders in this horizon.</p>
                 ) : (
@@ -722,6 +747,7 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
                 label="Risk Map"
                 title="Which parts need urgent attention?"
                 sub="Parts top-right need immediate action — long lead, low cover. Bubble = order qty."
+                tooltip="2D scatter: X-axis = supplier lead time (weeks), Y-axis = weeks of cover. Danger Zone = low cover + long lead time. Red dots in the danger zone need IMMEDIATE orders — by the time the PO arrives, you'll already be in stockout. Bubble size represents order quantity."
               />
               <ResponsiveContainer width="100%" height={280}>
                 <ScatterChart margin={{ top: 10, right: 16, left: 0, bottom: 24 }}>
@@ -788,7 +814,7 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
             {/* ⑨ PO Weekly Arrivals — Stacked */}
             <div className="ds-card xl:col-span-6" style={{ padding: 24 }}>
               <div className="flex items-start justify-between gap-3 mb-4">
-                <SectionHeader label="Inbound Outlook" title="PO Weekly Arrivals" />
+                <SectionHeader label="Inbound Outlook" title="PO Weekly Arrivals" tooltip="Currently open purchase orders and their expected arrival week (ETA). These inbound quantities are already factored into the Net End projections above. If ETA slips by even 1 week, reassess stockout risk for that part." />
                 <div className="flex items-center gap-4 flex-shrink-0">
                   {[{ color: C.TEAL, label: "Confirmed" }, { color: C.BLUE, label: "In Transit" }, { color: C.AMBER, label: "Planned" }].map(({ color, label }) => (
                     <div key={label} className="flex items-center gap-1.5">
@@ -842,7 +868,10 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <ClipboardList className="w-4 h-4" style={{ color: C.LABEL }} />
-                  <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE }}>Parts to restock (recommended)</h3>
+                  <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE }} className="flex items-center">
+                    Parts to restock (recommended)
+                    <InfoTooltip description="Actionable restock table for the Base scenario. NET END 4W shows projected inventory after 4 weeks — negative means stockout. ORDER QTY is MOQ-adjusted. STATUS shows the week you'll stock out if you don't order today." />
+                  </h3>
                   <span style={{
                     fontSize: 10,
                     fontWeight: 600,
@@ -975,7 +1004,10 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
           <div className="ds-card" style={{ padding: 24 }}>
             <div className="flex items-center gap-2 mb-4">
               <Truck className="w-4 h-4" style={{ color: C.LABEL }} />
-              <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE }}>Upcoming parts orders (open POs)</h3>
+              <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE }} className="flex items-center">
+                Upcoming parts orders (open POs)
+                <InfoTooltip description="Currently open purchase orders and their expected arrival week (ETA). These inbound quantities are already factored into the Net End projections above. If ETA slips by even 1 week, reassess stockout risk for that part." />
+              </h3>
               <span style={{ fontSize: 11, padding: "3px 8px", border: `1px solid ${C.BORDER}`, borderRadius: 8, color: C.LABEL }}>ETA weeks are relative</span>
             </div>
             {supply && incomingByPart.length > 0 ? (
