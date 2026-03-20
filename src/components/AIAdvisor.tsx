@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Bot, Send, X, Trash2, Sparkles, FileText, Download, User } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { type SKUData } from "@/data/forecastData";
@@ -19,6 +19,14 @@ interface AIAdvisorProps {
     cancel_rate: number;
   };
 }
+
+export type AIAdvisorHandle = {
+  open: () => void;
+  close: () => void;
+  toggle: () => void;
+  send: (text: string) => void;
+  generateReport: () => void;
+};
 
 const SUGGESTED = [
   "How do I increase profit next month?",
@@ -1540,7 +1548,10 @@ function DynamicVisuals({
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdvisorProps) {
+const AIAdvisor = forwardRef<AIAdvisorHandle, AIAdvisorProps>(function AIAdvisor(
+  { sku, activeScenario, currentSliders }: AIAdvisorProps,
+  ref,
+) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<AdvisorMessage[]>([]);
   const [input, setInput] = useState("");
@@ -1567,8 +1578,8 @@ export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdv
     prevContextRef.current = { skuId: sku.id, scenario: activeScenario };
   }, [sku.id, activeScenario, isOpen, sku.name]);
 
-  const handleSend = async (text?: string) => {
-    const msg = (text || input).trim();
+  const sendMessage = useCallback(async (msgRaw: string) => {
+    const msg = msgRaw.trim();
     if (!msg || loading) return;
 
     const userMsg: AdvisorMessage = { role: "user", content: msg };
@@ -1601,14 +1612,33 @@ export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdv
       toast.error("Failed to reach advisor. Please try again.");
       setLoading(false);
     }
+  }, [activeScenario, currentSliders, loading, messages, sku]);
+
+  const handleSend = async (text?: string) => {
+    const msg = (text ?? input).trim();
+    await sendMessage(msg);
   };
 
-  const handleGenerateReport = async () => {
+  const handleGenerateReport = useCallback(async () => {
     if (loading) return;
-    await handleSend(
+    await sendMessage(
       "Generate a 1-page executive demand planning report for the current SKU and active scenario.\n\nFormat rules:\n- PLAIN TEXT only (no JSON, no markdown tables).\n- Use clear section headings and bullet points.\n- Be specific and quantitative (use session numbers).\n\nRequired sections:\n1) Executive Summary (3 bullets)\n2) KPI Snapshot (6 bullets with values + units)\n3) Scenario Comparison (Bull/Base/Bear: peak, commit, gap vs commit, stance)\n4) Key Risks & Watchlist (4–6 bullets)\n5) 30/60/90 Day Action Plan (3 bullets per horizon)\n6) Final Recommendation (1–2 sentences)"
     );
-  };
+  }, [loading, sendMessage]);
+
+  useImperativeHandle(ref, () => ({
+    open: () => setIsOpen(true),
+    close: () => setIsOpen(false),
+    toggle: () => setIsOpen((v) => !v),
+    send: (text: string) => {
+      setIsOpen(true);
+      void sendMessage(text);
+    },
+    generateReport: () => {
+      setIsOpen(true);
+      void handleGenerateReport();
+    },
+  }), [handleGenerateReport, sendMessage]);
 
   const handleDownloadMessage = async (msg: AdvisorMessage, index: number) => {
     const cleaned = cleanContent(msg.content);
@@ -1920,4 +1950,6 @@ export default function AIAdvisor({ sku, activeScenario, currentSliders }: AIAdv
       )}
     </>
   );
-}
+});
+
+export default AIAdvisor;

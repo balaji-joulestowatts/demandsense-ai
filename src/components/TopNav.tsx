@@ -1,47 +1,82 @@
-import { BarChart3 } from "lucide-react";
-import { ALL_SKUS, type SKUData } from "@/data/forecastData";
+import { Bell, Search, Sun, Moon, Calendar } from "lucide-react";
+import { useEffect, useState } from "react";
 
-interface TopNavProps {
-  selectedSkuId: string;
-  onSkuChange: (id: string) => void;
-}
+export default function TopNav() {
+  const [dark, setDark] = useState(true);
+  const [query, setQuery] = useState("");
 
-export default function TopNav({ selectedSkuId, onSkuChange }: TopNavProps) {
+  // Initialize theme — default dark unless explicitly set to light
+  useEffect(() => {
+    const saved = localStorage.getItem("ds-theme");
+    const isDark = saved !== "light";
+    setDark(isDark);
+    document.documentElement.classList.toggle("dark", isDark);
+  }, []);
+
+  const toggleDark = () => {
+    const newDark = !dark;
+    setDark(newDark);
+    document.documentElement.classList.toggle("dark", newDark);
+    localStorage.setItem("ds-theme", newDark ? "dark" : "light");
+  };
+
   return (
-    <nav className="h-14 bg-card border-b flex items-center justify-between px-4 sm:px-8 sticky top-0 z-30">
-      <div className="flex items-center gap-3">
-        <div className="bg-primary text-primary-foreground p-1 rounded-md">
-           <BarChart3 className="w-4 h-4" />
-        </div>
-        <span className="font-semibold text-foreground tracking-tight text-[15px]">
-          DemandSense
-        </span>
-        <span className="hidden sm:inline-flex text-[10px] font-medium uppercase tracking-widest text-muted-foreground ml-2">
-          Prediction Studio
-        </span>
+    <nav
+      className="h-[60px] bg-card border-b border-border/60 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-30"
+      style={{ boxShadow: "0 1px 3px rgba(40,30,10,0.05)" }}
+    >
+      {/* Left: search bar */}
+      <div className="flex items-center gap-2 bg-secondary/60 rounded-full px-4 py-2 border border-border/50 min-w-[260px] max-w-[380px] w-full">
+        <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Find forecasts, signals or reports"
+          className="bg-transparent border-none text-foreground text-sm focus:outline-none w-full placeholder:text-muted-foreground"
+        />
       </div>
 
-      <div className="flex items-center gap-3">
-        <select
-          value={selectedSkuId}
-          onChange={(e) => onSkuChange(e.target.value)}
-          className="bg-secondary/50 border-none text-foreground font-medium rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring ds-transition min-w-[280px] shadow-sm hover:bg-secondary/80 cursor-pointer"
+      {/* Right: icons + avatar */}
+      <div className="flex items-center gap-1.5 ml-4">
+        <button
+          className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary ds-transition"
+          title="Notifications"
         >
-          {ALL_SKUS.map((sku: SKUData) => (
-            <option key={sku.id} value={sku.id}>
-              {sku.name} — {sku.category}
-            </option>
-          ))}
-        </select>
-      </div>
+          <Bell className="w-4 h-4 text-muted-foreground" />
+        </button>
 
-      <div className="hidden md:flex items-center gap-4">
-        <span className="inline-flex items-center bg-secondary/50 text-muted-foreground rounded-md px-2.5 py-1 font-mono text-[10px] tracking-wider uppercase">
-          ML Ensemble · GBM + LSTM
-        </span>
-        <span className="text-muted-foreground text-[11px] uppercase tracking-wider font-medium">
-          Last updated: 17 Mar 2026
-        </span>
+        <button
+          className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary ds-transition"
+          title="Calendar"
+        >
+          <Calendar className="w-4 h-4 text-muted-foreground" />
+        </button>
+
+        <button
+          className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary ds-transition"
+          title={dark ? "Switch to light mode" : "Switch to dark mode"}
+          onClick={toggleDark}
+        >
+          {dark ? (
+            <Sun className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <Moon className="w-4 h-4 text-muted-foreground" />
+          )}
+        </button>
+
+        <div className="flex items-center gap-2 ml-2 pl-3 border-l border-border/60">
+          <div
+            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+            style={{ background: "hsl(var(--ds-bear))" }}
+          >
+            DS
+          </div>
+          <div className="hidden md:block">
+            <p className="text-sm font-semibold text-foreground leading-tight">Admin</p>
+            <p className="text-[10px] text-muted-foreground leading-tight">Demand Analyst</p>
+          </div>
+        </div>
       </div>
     </nav>
   );

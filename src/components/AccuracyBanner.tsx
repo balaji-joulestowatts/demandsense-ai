@@ -61,19 +61,19 @@ export default function AccuracyBanner({ sku }: AccuracyBannerProps) {
                 <XAxis dataKey="horizon" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} domain={[0, 35]} unit="%" />
                 <Bar dataKey="ensemble" radius={[4, 4, 0, 0]} maxBarSize={28}>
-                  {chartData.map((_, i) => <Cell key={i} fill="#2563eb" />)}
+                  {chartData.map((_, i) => <Cell key={i} fill="hsl(195,55%,20%)" />)}
                 </Bar>
                 <Bar dataKey="baseline" radius={[4, 4, 0, 0]} maxBarSize={28}>
-                  {chartData.map((_, i) => <Cell key={i} fill="#cbd5e1" />)}
+                  {chartData.map((_, i) => <Cell key={i} fill="hsl(47,91%,61%)" />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
             <div className="flex gap-4 mt-2">
               <span className="flex items-center gap-1.5 text-[11px] text-ds-text-secondary">
-                <span className="w-3 h-2 rounded-sm bg-ds-base" /> ML Ensemble
+                <span className="w-3 h-2 rounded-sm" style={{ backgroundColor: "hsl(195,55%,20%)" }} /> ML Ensemble
               </span>
               <span className="flex items-center gap-1.5 text-[11px] text-ds-text-secondary">
-                <span className="w-3 h-2 rounded-sm bg-[#cbd5e1]" /> Baseline
+                <span className="w-3 h-2 rounded-sm" style={{ backgroundColor: "hsl(47,91%,61%)" }} /> Baseline
               </span>
             </div>
           </div>

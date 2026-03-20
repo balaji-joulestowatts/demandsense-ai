@@ -1,9 +1,88 @@
-import { Factory, Package, Calendar, Truck, ClipboardList } from "lucide-react";
+import { useMemo } from "react";
+import {
+  Factory, Package, Calendar, Truck, ClipboardList, ChartColumn,
+  ShieldAlert, RefreshCw, ArrowDownToLine, ReceiptText,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { type SKUData, type Scenario, type SupplyProfile } from "@/data/forecastData";
+import { type SKUData, type Scenario } from "@/data/forecastData";
+import {
+  Bar, BarChart, CartesianGrid, Cell, ComposedChart, LabelList,
+  Line, Area, Pie, PieChart, ReferenceArea, ReferenceLine,
+  ResponsiveContainer, Scatter, ScatterChart, XAxis, YAxis, ZAxis, Tooltip,
+} from "recharts";
+import {
+  buildPartProjection,
+  computeIncomingByPart,
+  computeReorderRows,
+  type ReorderRow,
+} from "@/lib/supplyAnalytics";
 import { toast } from "sonner";
 import clsx from "clsx";
+
+// ── Design palette ──────────────────────────────────────────────────────────
+const C = {
+  TEAL: "hsl(var(--ds-bull))",
+  AMBER: "hsl(var(--ds-warning))",
+  RED: "hsl(var(--destructive))",
+  BLUE: "hsl(var(--ds-base))",
+  PURPLE: "hsl(var(--ds-custom))",
+  SLATE: "hsl(var(--ds-text-tertiary))",
+  LABEL: "hsl(var(--ds-text-tertiary))",
+  BODY: "hsl(var(--ds-text-secondary))",
+  VALUE: "hsl(var(--ds-text-primary))",
+  BORDER: "hsl(var(--border))",
+  BORDER_BRIGHT: "hsl(var(--ds-border-subtle))",
+  CARD: "hsl(var(--card))",
+  CARD_INNER: "hsl(var(--ds-surface-muted))",
+  SURFACE: "hsl(var(--secondary))",
+  ROW_HOVER: "hsl(var(--foreground) / 0.04)",
+  TABLE_HEAD_BG: "hsl(var(--secondary) / 0.6)",
+  DANGER_BG: "hsl(var(--destructive) / 0.06)",
+  WARN_BG: "hsl(var(--ds-warning) / 0.06)",
+} as const;
+
+// ── Custom dark tooltip ──────────────────────────────────────────────────────
+function DarkTooltip({ active, payload, label, extra }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: C.CARD_INNER,
+      border: `1px solid ${C.BORDER_BRIGHT}`,
+      borderRadius: 10,
+      padding: "10px 14px",
+      fontSize: 12,
+      minWidth: 150,
+      boxShadow: "0 4px 24px rgba(0,0,0,0.6)",
+    }}>
+      {label && <p style={{ color: C.LABEL, marginBottom: 8, fontSize: 11, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</p>}
+      {payload.map((p: any, i: number) => (
+        p.value != null && p.value !== 0 && (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: p.color || p.fill, flexShrink: 0 }} />
+            <span style={{ color: C.LABEL, fontSize: 11 }}>{p.name}</span>
+            <span style={{ color: C.VALUE, fontWeight: 600, marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>
+              {typeof p.value === "number" ? p.value.toLocaleString() : p.value}
+            </span>
+          </div>
+        )
+      ))}
+      {extra}
+    </div>
+  );
+}
+
+// ── Types ────────────────────────────────────────────────────────────────────
+type InventoryVsRequirementRow = {
+  part: string;
+  netNow: number;
+  inbound4w: number;
+  available4w: number;
+  reqW1: number;
+  req4w: number;
+  safety: number;
+  netEnd4w: number;
+};
 
 interface PlannerPanelProps {
   sku: SKUData;
@@ -11,34 +90,33 @@ interface PlannerPanelProps {
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; border: string }> = {
-  "ACT NOW": { bg: "bg-[#fef2f2]", text: "text-[#b91c1c]", border: "border-[#fecaca]" },
-  WATCH: { bg: "bg-[#fffbeb]", text: "text-[#b45309]", border: "border-[#fde68a]" },
-  HOLD: { bg: "bg-[#f0fdf4]", text: "text-[#15803d]", border: "border-[#bbf7d0]" },
+  "ACT NOW": { bg: "hsl(var(--destructive) / 0.12)", text: "hsl(var(--destructive))", border: "hsl(var(--destructive) / 0.35)" },
+  WATCH: { bg: "hsl(var(--ds-warning) / 0.12)", text: "hsl(var(--ds-warning))", border: "hsl(var(--ds-warning) / 0.35)" },
+  HOLD: { bg: "hsl(var(--secondary) / 0.7)", text: "hsl(var(--ds-text-tertiary))", border: "hsl(var(--border))" },
 };
 
 const SCENARIO_COLORS: Record<string, string> = {
-  bull: "#16a34a",
-  base: "#2563eb",
-  bear: "#d97706",
+  bull: C.AMBER,
+  base: C.TEAL,
+  bear: C.SLATE,
 };
 
+// ── Confidence bar ───────────────────────────────────────────────────────────
 function ConfidenceBar({ value }: { value: number }) {
-  const color = value > 80 ? "#059669" : value >= 60 ? "#d97706" : "#dc2626";
+  const color = value > 80 ? C.TEAL : value >= 60 ? C.AMBER : C.RED;
   return (
     <div>
-      <p className="text-xs text-ds-text-secondary mb-1 tabular-nums">
+      <p style={{ fontSize: 11, color: C.LABEL, marginBottom: 4, fontVariantNumeric: "tabular-nums" }}>
         Alignment confidence: {value}%
       </p>
-      <div className="h-1.5 rounded-full bg-[#f1f5f9] overflow-hidden">
-        <div
-          className="h-full rounded-full"
-          style={{ width: `${value}%`, backgroundColor: color, transition: "width 1s ease-out" }}
-        />
+      <div style={{ height: 6, borderRadius: 999, background: C.BORDER, overflow: "hidden" }}>
+        <div style={{ width: `${value}%`, height: "100%", borderRadius: 999, backgroundColor: color, transition: "width 1s ease-out" }} />
       </div>
     </div>
   );
 }
 
+// ── Scenario card ────────────────────────────────────────────────────────────
 function ScenarioCard({ scenario }: { scenario: Scenario }) {
   const status = STATUS_STYLES[scenario.planner.action_status];
   const color = SCENARIO_COLORS[scenario.id];
@@ -46,47 +124,43 @@ function ScenarioCard({ scenario }: { scenario: Scenario }) {
 
   return (
     <div
-      className={clsx(
-        "pro-card-hover p-5 flex flex-col gap-4 border-l-4",
-        scenario.id === "bull" ? "bg-[#f0fdf4]" : scenario.id === "bear" ? "bg-[#fffbeb]" : "bg-[#eff6ff]",
-      )}
-      style={{ borderLeftColor: color }}
+      className="flex flex-col gap-4"
+      style={{
+        padding: "20px 18px",
+        background: C.CARD,
+        border: `1px solid ${C.BORDER}`,
+        borderLeft: `4px solid ${color}`,
+        borderRadius: 14,
+        boxShadow: "var(--ds-shadow-card)",
+        transition: "all 200ms ease",
+      }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color }}>
-            {scenario.label} scenario
-          </p>
-          <p className="text-xs text-ds-text-secondary mt-1 leading-snug line-clamp-2">
-            {scenario.description}
-          </p>
-        </div>
-        <span className={clsx("text-[11px] font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wider whitespace-nowrap", status.bg, status.text, status.border)}>
+        <p style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color }}>
+          {scenario.label} scenario
+        </p>
+        <span style={{
+          fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 9999,
+          background: status.bg, color: status.text, border: `1px solid ${status.border}`,
+          textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap",
+        }}>
           {scenario.planner.action_status}
         </span>
       </div>
 
       <div className="grid grid-cols-1 gap-3">
         {[
-          { icon: Factory, label: "Production commit", value: `${p.production_commit.toLocaleString()} units/wk`, highlight: true },
-          { icon: Package, label: "Inventory target", value: `${p.inventory_target_days} days cover` },
-          { icon: Calendar, label: "Release PO by", value: `Week ${p.procurement_week}` },
+          { icon: Factory,  label: "Production commit",   value: `${p.production_commit.toLocaleString()} units/wk`, highlight: true },
+          { icon: Package,  label: "Inventory target",    value: `${p.inventory_target_days} days cover` },
+          { icon: Calendar, label: "Release PO by",       value: `Week ${p.procurement_week}` },
         ].map(({ icon: Icon, label, value, highlight }) => (
           <div key={label} className="flex items-center gap-3">
-            <span className="ds-mini-icon">
-              <Icon className="w-4 h-4" />
+            <span className="inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: C.BORDER, flexShrink: 0 }}>
+              <Icon className="w-4 h-4" style={{ color: C.LABEL }} />
             </span>
             <div className="flex-1">
-              <p className="text-[12px] text-ds-text-secondary">{label}</p>
-              <p
-                className={clsx(
-                  "text-sm font-semibold tabular-nums tracking-tight",
-                  highlight ? "" : "text-ds-text-primary",
-                )}
-                style={highlight ? { color } : undefined}
-              >
-                {value}
-              </p>
+              <p style={{ fontSize: 12, color: C.LABEL }}>{label}</p>
+              <p style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: highlight ? color : C.VALUE }}>{value}</p>
             </div>
           </div>
         ))}
@@ -95,150 +169,45 @@ function ScenarioCard({ scenario }: { scenario: Scenario }) {
       <ConfidenceBar value={p.alignment_confidence} />
 
       <div className="flex gap-2 mt-auto">
-        <button
-          onClick={() => toast.success("✓ Exported to planning system")}
-          className="flex-1 py-2 text-xs font-medium border rounded-lg text-ds-text-secondary hover:bg-muted ds-transition"
-        >
-          Export decisions
-        </button>
-        <button
-          onClick={() => toast.success("✓ Review scheduled for next Monday")}
-          className="flex-1 py-2 text-xs font-medium border rounded-lg text-ds-text-secondary hover:bg-muted ds-transition"
-        >
-          Schedule review
-        </button>
+        {["Export decisions", "Schedule review"].map((label) => (
+          <button
+            key={label}
+            onClick={() => toast.success(`✓ ${label}`)}
+            style={{
+              flex: 1, padding: "8px 0", fontSize: 11, fontWeight: 500,
+              border: `1px solid ${C.BORDER}`, borderRadius: 8,
+              color: C.LABEL, background: "transparent",
+              transition: "all 200ms ease",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = C.BORDER; e.currentTarget.style.color = C.VALUE; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = C.LABEL; }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
-type ReorderRow = {
-  partId: string;
-  partName: string;
-  supplier: string;
-  uom: string;
-  leadTimeWeeks: number;
-  qtyPerSku: number;
-  onHand: number;
-  safetyStock: number;
-  onOrderHorizon: number;
-  requiredHorizon: number;
-  projectedEnding: number;
-  recommendedOrder: number;
-  riskLabel: string;
-  riskTone: "ok" | "watch" | "act";
-};
-
-function roundUpToMultiple(qty: number, multiple?: number): number {
-  if (!multiple || multiple <= 1) return Math.ceil(qty);
-  return Math.ceil(qty / multiple) * multiple;
+// ── Section header helper ────────────────────────────────────────────────────
+function SectionHeader({ label, title, sub }: { label: string; title: string; sub?: string }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <p style={{ fontSize: 10, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em", color: C.LABEL, marginBottom: 4 }}>{label}</p>
+      <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE, lineHeight: 1.3 }}>{title}</h3>
+      {sub && <p style={{ fontSize: 12, color: C.LABEL, marginTop: 4 }}>{sub}</p>}
+      <div style={{ height: 1, background: `linear-gradient(90deg, rgba(0,212,160,0.18), transparent 60%)`, marginTop: 12 }} />
+    </div>
+  );
 }
 
-function computeReorderRows({
-  supply,
-  productionCommitPerWeek,
-  procurementWeek,
-  horizonWeeks,
-}: {
-  supply: SupplyProfile;
-  productionCommitPerWeek: number;
-  procurementWeek: number;
-  horizonWeeks: number;
-}): { rows: ReorderRow[]; poLinesHorizonByPart: Record<string, number> } {
-  const partById = new Map(supply.parts.map((p) => [p.id, p] as const));
-  const bomByPart = new Map(supply.bom.map((b) => [b.part_id, b.qty_per_sku] as const));
-  const invByPart = new Map(supply.inventory.map((i) => [i.part_id, i] as const));
-
-  const poLinesHorizonByPart: Record<string, number> = {};
-  for (const po of supply.open_pos) {
-    if (po.eta_week > horizonWeeks) continue;
-    for (const line of po.lines) {
-      poLinesHorizonByPart[line.part_id] = (poLinesHorizonByPart[line.part_id] || 0) + line.qty;
-    }
-  }
-
-  const rows: ReorderRow[] = supply.parts.map((part) => {
-    const qtyPerSku = bomByPart.get(part.id) ?? 0;
-    const inv = invByPart.get(part.id);
-    const onHand = inv?.on_hand ?? 0;
-    const safetyStock = inv?.safety_stock ?? 0;
-    const onOrderHorizon = poLinesHorizonByPart[part.id] ?? 0;
-    const requiredPerWeek = productionCommitPerWeek * qtyPerSku;
-    const requiredHorizon = requiredPerWeek * horizonWeeks;
-
-    // Week-by-week projection to find the earliest risk week.
-    let projected = onHand;
-    let stockoutWeek: number | null = null;
-    let belowSafetyWeek: number | null = null;
-    for (let w = 1; w <= horizonWeeks; w++) {
-      for (const po of supply.open_pos) {
-        if (po.eta_week !== w) continue;
-        for (const line of po.lines) {
-          if (line.part_id === part.id) projected += line.qty;
-        }
-      }
-      projected -= requiredPerWeek;
-
-      if (stockoutWeek === null && projected < 0) stockoutWeek = w;
-      if (belowSafetyWeek === null && projected < safetyStock) belowSafetyWeek = w;
-    }
-
-    // Recommended order: cover safety stock at end of horizon.
-    const projectedEnding = onHand + onOrderHorizon - requiredHorizon;
-    const netVsSafety = projectedEnding - safetyStock;
-    const rawOrder = Math.max(0, -netVsSafety);
-    const orderAfterMoq = Math.max(rawOrder, rawOrder > 0 ? part.moq : 0);
-    const recommendedOrder = roundUpToMultiple(orderAfterMoq, part.order_multiple);
-
-    const riskLabel =
-      stockoutWeek !== null
-        ? `Stockout risk (W${stockoutWeek})`
-        : belowSafetyWeek !== null
-          ? `Below safety (W${belowSafetyWeek})`
-          : recommendedOrder > 0
-            ? `Reorder (release W${procurementWeek})`
-            : "OK";
-
-    const riskTone: ReorderRow["riskTone"] =
-      stockoutWeek !== null || recommendedOrder > 0
-        ? "act"
-        : belowSafetyWeek !== null
-          ? "watch"
-          : "ok";
-
-    return {
-      partId: part.id,
-      partName: part.name,
-      supplier: part.supplier,
-      uom: part.uom,
-      leadTimeWeeks: part.lead_time_weeks,
-      qtyPerSku,
-      onHand,
-      safetyStock,
-      onOrderHorizon,
-      requiredHorizon: Math.round(requiredHorizon),
-      projectedEnding: Math.round(projectedEnding),
-      recommendedOrder: Math.round(recommendedOrder),
-      riskLabel,
-      riskTone,
-    };
-  });
-
-  // Sort: act-now items first, then watch, then ok.
-  rows.sort((a, b) => {
-    const toneRank = (t: ReorderRow["riskTone"]) => (t === "act" ? 0 : t === "watch" ? 1 : 2);
-    const byTone = toneRank(a.riskTone) - toneRank(b.riskTone);
-    if (byTone !== 0) return byTone;
-    return b.recommendedOrder - a.recommendedOrder;
-  });
-
-  return { rows, poLinesHorizonByPart };
-}
-
+// ── Main component ───────────────────────────────────────────────────────────
 export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps) {
   const scenario = sku.scenarios[activeScenario];
   const supply = sku.supply;
   const horizonWeeks = 8;
+  const monthWeeks = 4;
 
   const computed = supply
     ? computeReorderRows({
@@ -249,174 +218,803 @@ export default function PlannerPanel({ sku, activeScenario }: PlannerPanelProps)
       })
     : null;
 
+  const recommendedOrderChartData = useMemo(() => {
+    if (!computed) return [] as Array<{ part: string; order: number }>;
+    return computed.rows
+      .filter((r) => r.recommendedOrder > 0)
+      .slice()
+      .sort((a, b) => b.recommendedOrder - a.recommendedOrder)
+      .slice(0, 10)
+      .map((r) => ({ part: r.partName, order: r.recommendedOrder }));
+  }, [computed]);
+
+  const incomingByPart = useMemo(() => {
+    if (!supply) return [];
+    return computeIncomingByPart({ supply, horizonWeeks });
+  }, [supply, horizonWeeks]);
+
+  // PO arrivals stacked by status
+  const poArrivalsStacked = useMemo(() => {
+    if (!supply) return [];
+    const result: Record<number, { week: string; confirmed: number; in_transit: number; planned: number }> = {};
+    for (let w = 1; w <= horizonWeeks; w++) result[w] = { week: `W${w}`, confirmed: 0, in_transit: 0, planned: 0 };
+    for (const po of supply.open_pos) {
+      if (po.eta_week < 1 || po.eta_week > horizonWeeks) continue;
+      const bucket = result[po.eta_week];
+      if (!bucket) continue;
+      const key = po.status as "confirmed" | "in_transit" | "planned";
+      if (key in bucket) (bucket[key] as number)++;
+    }
+    return Object.values(result);
+  }, [supply, horizonWeeks]);
+
+  const poStatusMix = useMemo(() => {
+    if (!supply) return [] as Array<{ status: string; value: number }>;
+    const counts = { confirmed: 0, in_transit: 0, planned: 0 } as Record<string, number>;
+    for (const po of supply.open_pos) {
+      if (po.eta_week < 1 || po.eta_week > horizonWeeks) continue;
+      counts[po.status] = (counts[po.status] || 0) + 1;
+    }
+    return Object.entries(counts).map(([status, value]) => ({ status, value })).filter((x) => x.value > 0);
+  }, [supply, horizonWeeks]);
+
+  const supplyKpis = useMemo(() => {
+    if (!computed || !supply) return null;
+    const stockoutCount = computed.rows.filter((r) => r.stockoutWeek != null).length;
+    const belowSafetyCount = computed.rows.filter((r) => r.stockoutWeek == null && r.belowSafetyWeek != null).length;
+    const reorderCount = computed.rows.filter((r) => r.recommendedOrder > 0).length;
+    const totalRecommendedQty = computed.rows.reduce((sum, r) => sum + (r.recommendedOrder > 0 ? r.recommendedOrder : 0), 0);
+    const inboundQtyHorizon = supply.open_pos
+      .filter((po) => po.eta_week >= 1 && po.eta_week <= horizonWeeks)
+      .flatMap((po) => po.lines)
+      .reduce((sum, l) => sum + l.qty, 0);
+    const arrivingPoCount = supply.open_pos.filter((po) => po.eta_week >= 1 && po.eta_week <= horizonWeeks).length;
+    const earliestStockoutWeek = computed.rows
+      .map((r) => r.stockoutWeek)
+      .filter((w): w is number => typeof w === "number")
+      .reduce((min, w) => Math.min(min, w), Number.POSITIVE_INFINITY);
+    return {
+      stockoutCount, belowSafetyCount, reorderCount, totalRecommendedQty,
+      inboundQtyHorizon: Math.round(inboundQtyHorizon), arrivingPoCount,
+      earliestStockoutWeek: Number.isFinite(earliestStockoutWeek) ? earliestStockoutWeek : null,
+    };
+  }, [computed, supply, horizonWeeks]);
+
+  const coverByPartData = useMemo(() => {
+    if (!computed) return [] as Array<{ part: string; cover: number; tone: "ok" | "watch" | "act" }>;
+    return computed.rows
+      .filter((r) => r.coverWeeks != null)
+      .slice()
+      .sort((a, b) => {
+        const score = (r: ReorderRow) => (r.stockoutWeek != null ? 0 : r.belowSafetyWeek != null ? 1 : 2);
+        const s = score(a) - score(b);
+        return s !== 0 ? s : (a.coverWeeks ?? 999) - (b.coverWeeks ?? 999);
+      })
+      .slice(0, 10)
+      .map((r) => ({ part: r.partName, cover: r.coverWeeks ?? 0, tone: r.riskTone }));
+  }, [computed]);
+
+  const inventoryVsRequirement4w = useMemo(() => {
+    if (!computed || !supply) return [] as InventoryVsRequirementRow[];
+    const inboundByPart4w: Record<string, number> = {};
+    for (const po of supply.open_pos) {
+      if (po.eta_week < 1 || po.eta_week > monthWeeks) continue;
+      for (const line of po.lines) {
+        inboundByPart4w[line.part_id] = (inboundByPart4w[line.part_id] || 0) + line.qty;
+      }
+    }
+    return computed.rows
+      .slice()
+      .sort((a, b) => {
+        const score = (r: ReorderRow) => (r.stockoutWeek != null ? 0 : r.belowSafetyWeek != null ? 1 : 2);
+        const s = score(a) - score(b);
+        return s !== 0 ? s : b.requiredPerWeek - a.requiredPerWeek;
+      })
+      .slice(0, 7)
+      .map((r) => {
+        const inbound4w = inboundByPart4w[r.partId] ?? 0;
+        const reqW1 = Math.round(r.requiredPerWeek);
+        const req4w = Math.round(r.requiredPerWeek * monthWeeks);
+        const netNow = Math.round(r.netAvailable);
+        const safety = Math.round(r.safetyStock);
+        const available4w = Math.round(netNow + inbound4w);
+        const netEnd4w = Math.round(netNow + inbound4w - req4w);
+        return { part: r.partName, netNow, inbound4w: Math.round(inbound4w), available4w, reqW1, req4w, safety, netEnd4w };
+      });
+  }, [computed, supply, monthWeeks]);
+
+  const criticalPartProjection = useMemo(() => {
+    if (!supply || !computed || computed.rows.length === 0) return null;
+    const score = (r: ReorderRow) => {
+      if (r.stockoutWeek != null) return { tier: 0, t: r.stockoutWeek };
+      if (r.belowSafetyWeek != null) return { tier: 1, t: r.belowSafetyWeek };
+      return { tier: 2, t: r.coverWeeks ?? Number.POSITIVE_INFINITY };
+    };
+    const critical = computed.rows.slice().sort((a, b) => {
+      const sa = score(a), sb = score(b);
+      return sa.tier !== sb.tier ? sa.tier - sb.tier : sa.t - sb.t;
+    })[0];
+    return {
+      partId: critical.partId,
+      partName: critical.partName,
+      safety: critical.safetyStock,
+      data: buildPartProjection({
+        supply, partId: critical.partId,
+        productionCommitPerWeek: scenario.planner.production_commit,
+        horizonWeeks,
+      }),
+    };
+  }, [supply, computed, scenario.planner.production_commit, horizonWeeks]);
+
+  const leadTimeVsCover = useMemo(() => {
+    if (!computed) return { act: [], watch: [], ok: [] } as Record<"act" | "watch" | "ok", Array<any>>;
+    const out = { act: [], watch: [], ok: [] } as Record<"act" | "watch" | "ok", Array<any>>;
+    for (const r of computed.rows) {
+      if (r.coverWeeks == null) continue;
+      const bubble = Math.min(5000, Math.max(0, r.recommendedOrder));
+      out[r.riskTone].push({ partName: r.partName, partId: r.partId, lead: r.leadTimeWeeks, cover: r.coverWeeks, bubble, order: r.recommendedOrder });
+    }
+    return out;
+  }, [computed]);
+
+  // Safety threshold for cover chart (use median lead time as proxy)
+  const safetyThreshold = useMemo(() => {
+    if (!computed || computed.rows.length === 0) return 4;
+    const leads = computed.rows.map((r) => r.leadTimeWeeks).sort((a, b) => a - b);
+    return leads[Math.floor(leads.length / 2)] ?? 4;
+  }, [computed]);
+
+  // Projected inventory min for danger zone
+  const minProjected = criticalPartProjection
+    ? Math.min(0, ...criticalPartProjection.data.map((d: any) => d.projected ?? 0))
+    : 0;
+
   return (
-    <section className="ds-section-card p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <section className="ds-section-card" style={{ padding: 24 }}>
+      {/* ── Section header ── */}
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-1">
         <div>
-          <p className="ds-section-title">Planner alignment</p>
-          <h2 className="text-lg font-medium text-ds-text-primary">Scenario comparison</h2>
-          <p className="text-xs text-ds-text-secondary mt-1">
-            Parts-level restock details reflect the active scenario: <span className="font-semibold">{scenario.label}</span>
+          <p className="ds-section-title mb-1">Planner Alignment</p>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: C.VALUE }}>Scenario Comparison</h2>
+          <p style={{ fontSize: 12, color: C.LABEL, marginTop: 4 }}>
+            Parts-level restock details reflect the active scenario: <span style={{ fontWeight: 600, color: C.VALUE }}>{scenario.label}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-[11px]">
-            Horizon: {horizonWeeks} weeks
-          </Badge>
-          <Badge variant="outline" className="text-[11px]">
-            Uses commit: {scenario.planner.production_commit.toLocaleString()} {sku.unit}/wk
-          </Badge>
+          <span style={{ fontSize: 11, padding: "4px 10px", border: `1px solid ${C.BORDER}`, borderRadius: 8, color: C.LABEL }}>Horizon: {horizonWeeks}W</span>
+          <span style={{ fontSize: 11, padding: "4px 10px", border: `1px solid ${C.BORDER}`, borderRadius: 8, color: C.LABEL }}>Commit: {scenario.planner.production_commit.toLocaleString()} {sku.unit}/wk</span>
         </div>
       </div>
+      <div className="ds-section-divider mt-4" />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Scenario cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         {(["bull", "base", "bear"] as const).map((id) => (
           <ScenarioCard key={id} scenario={sku.scenarios[id]} />
         ))}
       </div>
 
-      <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="ds-card p-4 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div className="flex items-center gap-2">
-              <ClipboardList className="w-4 h-4 text-ds-text-tertiary" />
-              <h3 className="font-semibold text-ds-text-primary">Parts to restock (recommended)</h3>
-            </div>
-            <Badge variant={scenario.planner.action_status === "ACT NOW" ? "destructive" : scenario.planner.action_status === "WATCH" ? "secondary" : "outline"}>
-              {scenario.planner.action_status}
-            </Badge>
+      {supply && computed && supplyKpis ? (
+        <div className="space-y-6">
+
+          {/* ── KPI strip ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(155px, 1fr))", gap: 12 }}>
+            {[
+              { icon: ShieldAlert,     iconColor: C.AMBER, iconBg: "hsl(var(--ds-warning) / 0.12)", label: "Below Safety", value: supplyKpis.belowSafetyCount, sub: `Parts at risk · ${horizonWeeks}w`, danger: supplyKpis.belowSafetyCount > 0 },
+              { icon: RefreshCw,       iconColor: C.BLUE,  iconBg: "hsl(var(--ds-base) / 0.12)", label: "Reorders", value: supplyKpis.reorderCount, sub: "MOQ/multiple sized", danger: false },
+              { icon: ArrowDownToLine, iconColor: C.TEAL,  iconBg: "hsl(var(--ds-bull) / 0.12)", label: "Inbound Qty", value: supplyKpis.inboundQtyHorizon.toLocaleString(), sub: `Arriving in ${horizonWeeks}w`, danger: false },
+              { icon: ReceiptText,     iconColor: C.LABEL, iconBg: "hsl(var(--ds-text-tertiary) / 0.12)", label: "POs Arriving", value: supplyKpis.arrivingPoCount, sub: `Open POs · ${horizonWeeks}w`, danger: false },
+            ].map(({ icon: Icon, iconColor, iconBg, label, value, sub, danger }) => (
+              <div key={label} className="ds-kpi-card" style={{ borderLeft: danger ? `3px solid ${C.AMBER}` : undefined }}>
+                <div className="flex items-start justify-between">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: iconBg }}>
+                    <Icon className="w-4 h-4" style={{ color: iconColor }} />
+                  </div>
+                  {danger && (
+                    <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 9999, background: "hsl(var(--ds-warning) / 0.15)", color: C.AMBER, border: `1px solid hsl(var(--ds-warning) / 0.35)` }}>Watch</span>
+                  )}
+                </div>
+                <p className="ds-kpi-label">{label}</p>
+                <p style={{ fontSize: 24, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: danger ? C.AMBER : C.VALUE }}>{value}</p>
+                <p className="ds-kpi-sub">{sub}</p>
+              </div>
+            ))}
           </div>
 
-          {!supply || !computed ? (
-            <p className="text-sm text-ds-text-secondary">No parts/BOM data configured for this SKU in the POC.</p>
-          ) : (
-            <div className="max-h-[420px] overflow-auto rounded-lg border border-border/60">
-              <Table className="border-0 rounded-none">
-              <TableHeader className="sticky top-0 z-10">
-                <TableRow>
-                  <TableHead>Part</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead className="text-right">On hand</TableHead>
-                  <TableHead className="text-right">On order</TableHead>
-                  <TableHead className="text-right">Req (8w)</TableHead>
-                  <TableHead className="text-right">End (8w)</TableHead>
-                  <TableHead className="text-right">Order</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {computed.rows.map((r) => (
-                  <TableRow key={r.partId}>
-                    <TableCell className="py-3">
-                      <div>
-                        <p className="font-medium text-ds-text-primary">
-                          {r.partName}
-                          <span className="text-xs text-ds-text-tertiary"> · {r.partId}</span>
-                        </p>
-                        <p className="text-xs text-ds-text-secondary">
-                          LT {r.leadTimeWeeks}w · {r.qtyPerSku} / {sku.unit} · {r.uom}
-                        </p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-3 text-ds-text-secondary">{r.supplier}</TableCell>
-                    <TableCell className="py-3 text-right tabular-nums">{Math.round(r.onHand).toLocaleString()}</TableCell>
-                    <TableCell className="py-3 text-right tabular-nums">{Math.round(r.onOrderHorizon).toLocaleString()}</TableCell>
-                    <TableCell className="py-3 text-right tabular-nums">{Math.round(r.requiredHorizon).toLocaleString()}</TableCell>
-                    <TableCell className={clsx("py-3 text-right tabular-nums", r.projectedEnding < r.safetyStock ? "text-[#b91c1c]" : "text-ds-text-primary")}>
-                      {Math.round(r.projectedEnding).toLocaleString()}
-                    </TableCell>
-                    <TableCell className={clsx("py-3 text-right tabular-nums font-semibold", r.recommendedOrder > 0 ? "text-[#b91c1c]" : "text-ds-text-secondary")}>
-                      {r.recommendedOrder > 0 ? r.recommendedOrder.toLocaleString() : "—"}
-                    </TableCell>
-                    <TableCell className="py-3">
-                      <Badge
-                        variant={r.riskTone === "act" ? "destructive" : r.riskTone === "watch" ? "secondary" : "outline"}
-                        className="text-[11px]"
-                      >
-                        {r.riskLabel}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            </div>
-          )}
+          {/* ── Charts grid ── */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
 
-          {supply && computed ? (
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <p className="text-xs text-ds-text-secondary">
-                Recommendation uses safety stock and rounds to MOQ/multiples.
-              </p>
+            {/* ⑤ Weeks of Cover — Horizontal BarChart */}
+            <div className="ds-card xl:col-span-8" style={{ padding: 24 }}>
+              <SectionHeader label="Supply Control Tower" title="Supply Coverage Health" sub="Weeks of cover by component vs safety threshold" />
+              {coverByPartData.length === 0 ? (
+                <p style={{ fontSize: 13, color: C.LABEL }}>No cover data available.</p>
+              ) : (
+                <>
+                  <ResponsiveContainer width="100%" height={coverByPartData.length * 44 + 40}>
+                    <BarChart
+                      data={coverByPartData}
+                      layout="vertical"
+                      margin={{ top: 0, right: 56, left: 0, bottom: 16 }}
+                    >
+                      <CartesianGrid horizontal={false} vertical={true} stroke={C.BORDER} strokeDasharray="3 6" />
+                      <XAxis
+                        type="number"
+                        domain={[0, 16]}
+                        tick={{ fill: C.LABEL, fontSize: 10 }}
+                        axisLine={false}
+                        tickLine={false}
+                        label={{ value: "Weeks of Cover", position: "insideBottom", offset: -8, fill: C.LABEL, fontSize: 10 }}
+                      />
+                      <YAxis
+                        type="category"
+                        dataKey="part"
+                        width={148}
+                        tick={{ fill: C.BODY, fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        tickFormatter={(v: string) => v.length > 20 ? `${v.slice(0, 20)}…` : v}
+                      />
+                      <ReferenceLine x={safetyThreshold} stroke={C.AMBER} strokeDasharray="4 3" strokeWidth={1.5} />
+                      <Tooltip content={<DarkTooltip />} cursor={{ fill: C.ROW_HOVER }} />
+                      <Bar dataKey="cover" radius={[0, 6, 6, 0]} barSize={16} background={{ fill: C.BORDER, radius: [0, 6, 6, 0] } as any}>
+                        <LabelList
+                          dataKey="cover"
+                          position="right"
+                          formatter={(v: number) => `${v}w`}
+                          style={{ fontSize: 11, fontWeight: 600 }}
+                          content={(props: any) => {
+                            const { x, y, width, value, index } = props;
+                            const d = coverByPartData[index];
+                            const color = !d ? C.LABEL : d.cover >= safetyThreshold + 4 ? C.TEAL : d.cover >= safetyThreshold ? C.AMBER : C.RED;
+                            return (
+                              <text x={(x ?? 0) + (width ?? 0) + 6} y={(y ?? 0) + 8} fill={color} fontSize={11} fontWeight={600}>
+                                {value}w
+                              </text>
+                            );
+                          }}
+                        />
+                        {coverByPartData.map((d, i) => (
+                          <Cell key={i} fill={d.cover >= safetyThreshold + 4 ? C.TEAL : d.cover >= safetyThreshold ? C.AMBER : C.RED} fillOpacity={0.9} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                  <div className="flex gap-5 mt-2">
+                    {[{ color: C.TEAL, label: "Safe" }, { color: C.AMBER, label: "Watch" }, { color: C.RED, label: "Danger" }].map(({ color, label }) => (
+                      <div key={label} className="flex items-center gap-1.5">
+                        <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color, flexShrink: 0, display: "inline-block" }} />
+                        <span style={{ fontSize: 11, color: C.LABEL }}>{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* ④ Projected Inventory Trajectory */}
+            <div className="ds-card xl:col-span-12" style={{ padding: 24 }}>
+              <SectionHeader
+                label="Most Constrained Component"
+                title="Projected Inventory Trajectory"
+                sub={criticalPartProjection ? `${criticalPartProjection.partName} · ${criticalPartProjection.partId}` : undefined}
+              />
+              {criticalPartProjection ? (
+                <ResponsiveContainer width="100%" height={240}>
+                  <ComposedChart data={criticalPartProjection.data} margin={{ top: 10, right: 60, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="projGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%"   stopColor={C.TEAL} stopOpacity={0.18} />
+                        <stop offset="100%" stopColor={C.TEAL} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke={C.BORDER} strokeDasharray="3 6" vertical={false} />
+                    <XAxis dataKey="week" tick={{ fill: C.LABEL, fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis
+                      tick={{ fill: C.LABEL, fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={48}
+                      tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)}
+                    />
+                    <Tooltip content={<DarkTooltip />} />
+                    {/* Danger zone below zero */}
+                    {minProjected < 0 && (
+                      <ReferenceArea y1={minProjected} y2={0} fill="hsl(var(--destructive) / 0.08)" />
+                    )}
+                    {/* Zero line */}
+                    <ReferenceLine y={0} stroke={C.BORDER_BRIGHT} strokeWidth={1} />
+                    {/* Safety stock line */}
+                    <ReferenceLine
+                      y={criticalPartProjection.data[0]?.safety ?? 0}
+                      stroke={C.AMBER}
+                      strokeDasharray="8 4"
+                      strokeWidth={1.5}
+                      label={{ value: "⚠ Safety", fill: C.AMBER, fontSize: 10, position: "right" }}
+                    />
+                    {/* Inbound bars */}
+                    <Bar dataKey="inbound" fill={C.BLUE} fillOpacity={0.70} radius={[4, 4, 0, 0]} barSize={22} name="Inbound" />
+                    {/* Projected area */}
+                    <Area
+                      type="monotone"
+                      dataKey="projected"
+                      stroke={C.TEAL}
+                      strokeWidth={2.5}
+                      fill="url(#projGradient)"
+                      dot={{ r: 4, fill: C.TEAL, stroke: C.CARD, strokeWidth: 2 }}
+                      activeDot={{ r: 6, fill: C.TEAL }}
+                      name="Projected"
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              ) : (
+                <p style={{ fontSize: 13, color: C.LABEL }}>No projection available.</p>
+              )}
+              <div className="flex gap-5 mt-3">
+                {[
+                  { color: C.BLUE, label: "Inbound per week" },
+                  { color: C.TEAL, label: "Projected inventory" },
+                  { color: C.AMBER, label: "Safety stock threshold", dashed: true },
+                ].map(({ color, label, dashed }) => (
+                  <div key={label} className="flex items-center gap-2">
+                    {dashed
+                      ? <span style={{ width: 16, height: 1, borderTop: `2px dashed ${color}`, display: "inline-block" }} />
+                      : <span style={{ width: 12, height: 10, borderRadius: 2, backgroundColor: color, display: "inline-block" }} />
+                    }
+                    <span style={{ fontSize: 11, color: C.LABEL }}>{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ⑥ Inventory vs Requirement */}
+            <div className="ds-card xl:col-span-12" style={{ padding: 24 }}>
+              <SectionHeader
+                label="Inventory vs Requirement"
+                title="Can we cover the next 4 weeks of demand?"
+                sub="Available (on hand + inbound) vs what will be consumed. If amber exceeds teal, you need to act."
+              />
+              {inventoryVsRequirement4w.length === 0 ? (
+                <p style={{ fontSize: 13, color: C.LABEL }}>No inventory data available.</p>
+              ) : (
+                <>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart
+                      data={inventoryVsRequirement4w}
+                      margin={{ top: 10, right: 16, left: 0, bottom: 40 }}
+                      barCategoryGap="28%"
+                      barGap={3}
+                    >
+                      <CartesianGrid stroke={C.BORDER} strokeDasharray="3 6" vertical={false} />
+                      <XAxis
+                        dataKey="part"
+                        tick={{ fill: C.LABEL, fontSize: 11 }}
+                        axisLine={{ stroke: C.BORDER }}
+                        tickLine={false}
+                        interval={0}
+                        angle={-20}
+                        textAnchor="end"
+                        height={50}
+                        tickMargin={8}
+                        tickFormatter={(v: string) => v.length > 14 ? `${v.slice(0, 14)}…` : v}
+                      />
+                      <YAxis
+                        tick={{ fill: C.LABEL, fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={52}
+                        tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)}
+                      />
+                      <Tooltip
+                        content={({ active, payload, label }) => {
+                          if (!active || !payload?.length) return null;
+                          const row = inventoryVsRequirement4w.find((r) => r.part === label);
+                          if (!row) return null;
+                          const surplus = row.available4w - row.req4w;
+                          return (
+                            <div style={{ background: C.CARD_INNER, border: `1px solid ${C.BORDER_BRIGHT}`, borderRadius: 10, padding: "10px 14px", fontSize: 12, minWidth: 220, boxShadow: "0 4px 24px rgba(0,0,0,0.6)" }}>
+                              <p style={{ color: C.VALUE, fontWeight: 700, marginBottom: 8 }}>{label}</p>
+                              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                                <span style={{ color: C.LABEL }}>Available (4w)</span>
+                                <span style={{ color: C.TEAL, fontWeight: 600 }}>{row.available4w.toLocaleString()}</span>
+                              </div>
+                              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                                <span style={{ color: C.LABEL }}>Required (4w)</span>
+                                <span style={{ color: C.AMBER, fontWeight: 600 }}>{row.req4w.toLocaleString()}</span>
+                              </div>
+                              <div style={{ borderTop: `1px solid ${C.BORDER}`, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700, color: surplus >= 0 ? C.TEAL : C.RED }}>
+                                <span>{surplus >= 0 ? `+${surplus.toLocaleString()} surplus` : `–${Math.abs(surplus).toLocaleString()} shortfall`}</span>
+                              </div>
+                            </div>
+                          );
+                        }}
+                      />
+                      <Bar dataKey="available4w" fill={C.TEAL} fillOpacity={0.85} radius={[4, 4, 0, 0]} maxBarSize={36} name="Available" />
+                      <Bar dataKey="req4w"       fill={C.AMBER} fillOpacity={0.80} radius={[4, 4, 0, 0]} maxBarSize={36} name="Required" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                  <div className="flex gap-5 mt-2">
+                    {[{ color: C.TEAL, label: "Available (net + inbound)" }, { color: C.AMBER, label: "Required 4-week demand" }].map(({ color, label }) => (
+                      <div key={label} className="flex items-center gap-2">
+                        <span style={{ width: 12, height: 10, borderRadius: 2, backgroundColor: color, display: "inline-block" }} />
+                        <span style={{ fontSize: 12, color: C.LABEL }}>{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* ⑦ Recommended Orders */}
+            <div className="xl:col-span-6 overflow-hidden" style={{ background: C.CARD, border: `1px solid ${C.BORDER}`, borderRadius: 14, boxShadow: "var(--ds-shadow-card)" }}>
+              <div style={{ padding: "24px 24px 16px 24px" }}>
+                <SectionHeader label="Procurement Action" title="Recommended Orders" sub="Ranked by urgency · sized to MOQ" />
+                {recommendedOrderChartData.length === 0 ? (
+                  <p style={{ fontSize: 13, color: C.LABEL }}>No recommended orders in this horizon.</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart
+                      data={recommendedOrderChartData}
+                      margin={{ top: 24, right: 16, left: 0, bottom: recommendedOrderChartData.length > 5 ? 40 : 16 }}
+                    >
+                      <defs>
+                        <linearGradient id="redGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="hsl(var(--destructive))" />
+                          <stop offset="100%" stopColor="hsl(var(--destructive) / 0.85)" />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke={C.BORDER} strokeDasharray="3 6" vertical={false} />
+                      <XAxis
+                        dataKey="part"
+                        tick={{ fill: C.LABEL, fontSize: 10 }}
+                        axisLine={{ stroke: C.BORDER }}
+                        tickLine={false}
+                        interval={0}
+                        angle={recommendedOrderChartData.length > 5 ? -30 : 0}
+                        textAnchor={recommendedOrderChartData.length > 5 ? "end" : "middle"}
+                        height={recommendedOrderChartData.length > 5 ? 50 : 24}
+                        tickFormatter={(v: string) => v.length > 12 ? `${v.slice(0, 12)}…` : v}
+                      />
+                      <YAxis
+                        tick={{ fill: C.LABEL, fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={48}
+                        tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)}
+                      />
+                      <Tooltip content={<DarkTooltip />} cursor={{ fill: C.ROW_HOVER }} />
+                      <Bar dataKey="order" fill="url(#redGradient)" radius={[6, 6, 0, 0]} name="Order qty">
+                        <LabelList
+                          dataKey="order"
+                          position="top"
+                          formatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toLocaleString()}
+                          style={{ fill: C.RED, fontSize: 11, fontWeight: 600 }}
+                        />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+              {/* Footer strip */}
+              {supplyKpis && (
+                <div style={{
+                  background: C.CARD_INNER,
+                  borderTop: `1px solid ${C.BORDER}`,
+                  padding: "12px 24px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderRadius: "0 0 14px 14px",
+                }}>
+                  <p style={{ fontSize: 12, color: C.VALUE, fontWeight: 600 }}>
+                    📦 {supplyKpis.totalRecommendedQty.toLocaleString()} units total recommended
+                  </p>
+                  <p style={{ fontSize: 11, color: C.LABEL }}>
+                    Sized to MOQ · Safety stock horizon: {horizonWeeks}W
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* ⑧ Risk Map Scatter */}
+            <div className="ds-card xl:col-span-6" style={{ padding: 24 }}>
+              <SectionHeader
+                label="Risk Map"
+                title="Which parts need urgent attention?"
+                sub="Parts top-right need immediate action — long lead, low cover. Bubble = order qty."
+              />
+              <ResponsiveContainer width="100%" height={280}>
+                <ScatterChart margin={{ top: 10, right: 16, left: 0, bottom: 24 }}>
+                  <CartesianGrid stroke={C.BORDER} strokeDasharray="3 6" />
+                  <XAxis
+                    dataKey="lead"
+                    type="number"
+                    domain={[0, 8]}
+                    tick={{ fill: C.LABEL, fontSize: 10 }}
+                    axisLine={{ stroke: C.BORDER }}
+                    tickLine={false}
+                    label={{ value: "Lead time (weeks)", position: "insideBottom", offset: -12, fill: C.LABEL, fontSize: 10 }}
+                  />
+                  <YAxis
+                    dataKey="cover"
+                    type="number"
+                    domain={[0, 16]}
+                    tick={{ fill: C.LABEL, fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={40}
+                    label={{ value: "Weeks of cover", angle: -90, position: "insideLeft", offset: 10, fill: C.LABEL, fontSize: 10 }}
+                  />
+                  <ZAxis dataKey="bubble" range={[30, 350]} />
+                  {/* Danger zone */}
+                  <ReferenceArea x1={4} x2={8} y1={0} y2={4} fill="hsl(var(--destructive) / 0.08)" stroke="hsl(var(--destructive) / 0.2)" strokeDasharray="4 4" label={{ value: "DANGER ZONE", fill: C.RED, fontSize: 9 }} />
+                  <ReferenceLine x={4} stroke={C.BORDER_BRIGHT} strokeWidth={1} label={{ value: "Longer lead →", fill: C.SLATE, fontSize: 10, position: "insideTopRight" }} />
+                  <ReferenceLine y={4} stroke={C.BORDER_BRIGHT} strokeWidth={1} label={{ value: "↑ Low cover", fill: C.SLATE, fontSize: 10, position: "insideTopLeft" }} />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const p = payload[0]?.payload as any;
+                      if (!p) return null;
+                      const zone = p.cover < 4 && p.lead > 4 ? "🔴 Danger zone" : p.cover < 6 ? "🟡 Watch zone" : "🟢 Safe";
+                      return (
+                        <div style={{ background: C.CARD_INNER, border: `1px solid ${C.BORDER_BRIGHT}`, borderRadius: 10, padding: "10px 14px", fontSize: 12, minWidth: 180, boxShadow: "0 4px 24px rgba(0,0,0,0.6)" }}>
+                          <p style={{ color: C.VALUE, fontWeight: 700, marginBottom: 4 }}>{p.partName}</p>
+                          <p style={{ color: C.LABEL, fontSize: 11, marginBottom: 8 }}>{zone}</p>
+                          {[["Lead time", `${p.lead} wks`], ["Stock cover", `${p.cover} wks`], ...(p.order > 0 ? [["Order qty", p.order.toLocaleString()]] : [])].map(([k, v]) => (
+                            <div key={k as string} style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 3 }}>
+                              <span style={{ color: C.LABEL }}>{k}</span>
+                              <span style={{ color: C.VALUE, fontWeight: 600 }}>{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }}
+                  />
+                  <Scatter name="Act now" data={leadTimeVsCover.act}   fill={C.RED}   fillOpacity={0.85} stroke={`${C.RED}40`} />
+                  <Scatter name="Watch"   data={leadTimeVsCover.watch} fill={C.AMBER} fillOpacity={0.85} stroke={`${C.AMBER}40`} />
+                  <Scatter name="OK"      data={leadTimeVsCover.ok}    fill={C.TEAL}  fillOpacity={0.70} stroke={`${C.TEAL}40`} />
+                </ScatterChart>
+              </ResponsiveContainer>
+              <div className="flex gap-4 mt-3">
+                {[{ color: C.RED, label: "Act now — order immediately" }, { color: C.AMBER, label: "Watch — cover thinning" }, { color: C.TEAL, label: "OK — sufficient cover" }].map(({ color, label }) => (
+                  <div key={label} className="flex items-center gap-1.5">
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: C.LABEL }}>{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ⑨ PO Weekly Arrivals — Stacked */}
+            <div className="ds-card xl:col-span-6" style={{ padding: 24 }}>
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <SectionHeader label="Inbound Outlook" title="PO Weekly Arrivals" />
+                <div className="flex items-center gap-4 flex-shrink-0">
+                  {[{ color: C.TEAL, label: "Confirmed" }, { color: C.BLUE, label: "In Transit" }, { color: C.AMBER, label: "Planned" }].map(({ color, label }) => (
+                    <div key={label} className="flex items-center gap-1.5">
+                      <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, color: C.LABEL }}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <ResponsiveContainer width="100%" height={160}>
+                  <BarChart data={poArrivalsStacked} margin={{ top: 4, right: 8, left: 0, bottom: 0 }} barCategoryGap="35%">
+                    <XAxis dataKey="week" tick={{ fill: C.LABEL, fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: C.LABEL, fontSize: 10 }} axisLine={false} tickLine={false} width={28} allowDecimals={false} />
+                    <Tooltip content={<DarkTooltip />} cursor={{ fill: C.ROW_HOVER }} />
+                    <Bar dataKey="confirmed"  stackId="a" fill={C.TEAL}  barSize={28} name="Confirmed" />
+                    <Bar dataKey="in_transit" stackId="a" fill={C.BLUE}  name="In Transit" />
+                    <Bar dataKey="planned"    stackId="a" fill={C.AMBER} radius={[4, 4, 0, 0]} name="Planned" />
+                  </BarChart>
+                </ResponsiveContainer>
+
+                {/* PO status donut */}
+                {poStatusMix.length > 0 && (
+                  <div className="relative" style={{ height: 160 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={poStatusMix} dataKey="value" nameKey="status" innerRadius="50%" outerRadius="75%" paddingAngle={3} strokeWidth={0}>
+                          {poStatusMix.map((entry, idx) => (
+                            <Cell key={idx} fill={
+                              entry.status === "confirmed"  ? C.TEAL  :
+                              entry.status === "in_transit" ? C.BLUE  : C.AMBER
+                            } />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <p style={{ fontSize: 22, fontWeight: 800, color: C.VALUE, lineHeight: 1 }}>{poStatusMix.reduce((s, x) => s + x.value, 0)}</p>
+                      <p style={{ fontSize: 10, color: C.LABEL }}>POs</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+
+          {/* ── Parts restock table ── */}
+          <div className="ds-card" style={{ padding: 24 }}>
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <ClipboardList className="w-4 h-4" style={{ color: C.LABEL }} />
+                  <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE }}>Parts to restock (recommended)</h3>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    padding: "3px 8px",
+                    borderRadius: 9999,
+                    background:
+                      scenario.planner.action_status === "ACT NOW"
+                        ? "hsl(var(--destructive) / 0.12)"
+                        : scenario.planner.action_status === "WATCH"
+                          ? "hsl(var(--ds-warning) / 0.12)"
+                          : "hsl(var(--secondary) / 0.7)",
+                    color:
+                      scenario.planner.action_status === "ACT NOW"
+                        ? C.RED
+                        : scenario.planner.action_status === "WATCH"
+                          ? C.AMBER
+                          : C.SLATE,
+                    border: `1px solid ${
+                      scenario.planner.action_status === "ACT NOW"
+                        ? "hsl(var(--destructive) / 0.35)"
+                        : scenario.planner.action_status === "WATCH"
+                          ? "hsl(var(--ds-warning) / 0.35)"
+                          : "hsl(var(--border))"
+                    }`,
+                  }}>
+                    {scenario.planner.action_status}
+                  </span>
+                </div>
+                <p style={{ fontSize: 12, color: C.LABEL, paddingLeft: 24 }}>
+                  Order column shows MOQ-rounded qty needed to stay above safety stock through week {horizonWeeks}.
+                </p>
+              </div>
               <button
                 onClick={() => toast.success("✓ Restock plan exported")}
-                className="py-1.5 px-3 text-xs border rounded-lg text-ds-text-secondary hover:bg-muted ds-transition"
+                style={{ padding: "7px 14px", fontSize: 12, border: `1px solid ${C.BORDER}`, borderRadius: 8, color: C.LABEL, background: "transparent", transition: "all 200ms ease" }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.BORDER; e.currentTarget.style.color = C.VALUE; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = C.LABEL; }}
               >
                 Export restock plan
               </button>
             </div>
-          ) : null}
-        </div>
 
-        <div className="ds-card p-4 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div className="flex items-center gap-2">
-              <Truck className="w-4 h-4 text-ds-text-tertiary" />
-              <h3 className="font-semibold text-ds-text-primary">Upcoming parts orders (open POs)</h3>
-            </div>
-            <Badge variant="outline" className="text-[11px]">ETA weeks are relative</Badge>
+            {!supply || !computed ? (
+              <p style={{ fontSize: 13, color: C.LABEL }}>No parts/BOM data configured for this SKU.</p>
+            ) : (
+              <div className="overflow-auto rounded-xl" style={{ border: `1px solid ${C.BORDER}` }}>
+                <Table className="border-0 rounded-none min-w-[900px]">
+                  <TableHeader>
+                    <TableRow style={{ background: C.TABLE_HEAD_BG }} className="hover:bg-transparent">
+                      <TableHead className="w-[260px]" style={{ color: C.LABEL }}>Part</TableHead>
+                      <TableHead style={{ color: C.LABEL, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>Supplier · LT</TableHead>
+                      <TableHead className="text-right" style={{ color: C.LABEL }}>Net now</TableHead>
+                      <TableHead className="text-right" style={{ color: C.LABEL }}>Safety</TableHead>
+                      <TableHead className="text-right" style={{ color: C.LABEL }}>Inbound 4w</TableHead>
+                      <TableHead className="text-right" style={{ color: C.LABEL }}>Req W1</TableHead>
+                      <TableHead className="text-right" style={{ color: C.LABEL }}>Req 4w</TableHead>
+                      <TableHead className="text-right" style={{ color: C.LABEL }}>Net end 4w</TableHead>
+                      <TableHead className="text-right" style={{ color: C.RED }}>Order qty</TableHead>
+                      <TableHead style={{ color: C.LABEL }}>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {computed.rows.map((r) => {
+                      const inbound4w = supply.open_pos
+                        .filter((po) => po.eta_week >= 1 && po.eta_week <= monthWeeks)
+                        .flatMap((po) => po.lines)
+                        .filter((l) => l.part_id === r.partId)
+                        .reduce((sum, l) => sum + l.qty, 0);
+                      const reqW1 = Math.round(r.requiredPerWeek);
+                      const req4w = Math.round(r.requiredPerWeek * monthWeeks);
+                      const netEnd4w = Math.round(r.netAvailable + inbound4w - req4w);
+                      const isAtRisk = r.stockoutWeek != null;
+                      const isWarn = !isAtRisk && r.belowSafetyWeek != null;
+
+                      return (
+                        <TableRow
+                          key={r.partId}
+                          style={{
+                            background: isAtRisk ? C.DANGER_BG : isWarn ? C.WARN_BG : undefined,
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = C.ROW_HOVER; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = isAtRisk ? C.DANGER_BG : isWarn ? C.WARN_BG : ""; }}
+                        >
+                          <TableCell className="py-3">
+                            <div className="flex items-start gap-2">
+                              <span className="mt-1 flex-shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: isAtRisk ? C.RED : isWarn ? C.AMBER : C.TEAL }} />
+                              <div>
+                                <p style={{ fontWeight: 600, color: C.VALUE, fontSize: 13 }} title={r.partName}>{r.partName}</p>
+                                <p style={{ fontSize: 10, color: C.LABEL }}>{r.partId} · {r.qtyPerSku}/{sku.unit} · MOQ {r.moq.toLocaleString()}</p>
+                                <p style={{ fontSize: 10, color: C.LABEL }}>Cover: <span style={{ fontWeight: 600, color: r.coverWeeks != null && r.coverWeeks < r.leadTimeWeeks ? C.RED : C.BODY }}>{r.coverWeeks != null ? `${r.coverWeeks}w` : "—"}</span></p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-3">
+                            <p style={{ fontSize: 12, color: C.BODY }}>{r.supplier}</p>
+                            <p style={{ fontSize: 10, color: C.LABEL }}>LT: {r.leadTimeWeeks}w</p>
+                          </TableCell>
+                          <TableCell className="py-3 text-right tabular-nums text-sm" style={{ color: C.VALUE }}>{Math.round(r.netAvailable).toLocaleString()}</TableCell>
+                          <TableCell className="py-3 text-right tabular-nums text-sm" style={{ color: C.LABEL }}>{Math.round(r.safetyStock).toLocaleString()}</TableCell>
+                          <TableCell className="py-3 text-right tabular-nums text-sm" style={{ color: C.VALUE }}>{Math.round(inbound4w).toLocaleString()}</TableCell>
+                          <TableCell className="py-3 text-right tabular-nums text-sm" style={{ color: C.VALUE }}>{reqW1.toLocaleString()}</TableCell>
+                          <TableCell className="py-3 text-right tabular-nums text-sm" style={{ color: C.VALUE }}>{req4w.toLocaleString()}</TableCell>
+                          <TableCell className="py-3 text-right tabular-nums text-sm font-medium" style={{ color: netEnd4w < r.safetyStock ? C.RED : C.VALUE }}>
+                            {netEnd4w.toLocaleString()}{netEnd4w < r.safetyStock && <span style={{ marginLeft: 4, fontSize: 10 }}>↓</span>}
+                          </TableCell>
+                          <TableCell className="py-3 text-right tabular-nums font-bold text-sm" style={{ color: r.recommendedOrder > 0 ? C.RED : C.LABEL }}>
+                            {r.recommendedOrder > 0 ? r.recommendedOrder.toLocaleString() : "—"}
+                          </TableCell>
+                          <TableCell className="py-3">
+                            {r.stockoutWeek != null ? (
+                              <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 9999, background: "hsl(var(--destructive) / 0.12)", color: C.RED, border: `1px solid hsl(var(--destructive) / 0.35)`, whiteSpace: "nowrap" }}>Stockout W{r.stockoutWeek}</span>
+                            ) : r.belowSafetyWeek != null ? (
+                              <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 9999, background: "hsl(var(--ds-warning) / 0.12)", color: C.AMBER, border: `1px solid hsl(var(--ds-warning) / 0.35)`, whiteSpace: "nowrap" }}>Below safety W{r.belowSafetyWeek}</span>
+                            ) : r.recommendedOrder > 0 ? (
+                              <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 9999, background: "hsl(var(--ds-base) / 0.12)", color: C.BLUE, border: `1px solid hsl(var(--ds-base) / 0.35)`, whiteSpace: "nowrap" }}>Reorder by W{scenario.planner.procurement_week}</span>
+                            ) : (
+                              <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 9999, background: "hsl(var(--ds-bull) / 0.1)", color: C.TEAL, border: `1px solid hsl(var(--ds-bull) / 0.3)`, whiteSpace: "nowrap" }}>✓ OK</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </div>
 
-          {!supply ? (
-            <p className="text-sm text-ds-text-secondary">No purchase order data configured for this SKU in the POC.</p>
-          ) : supply.open_pos.length === 0 ? (
-            <p className="text-sm text-ds-text-secondary">No open purchase orders.</p>
-          ) : (
-            <div className="max-h-[420px] overflow-auto rounded-lg border border-border/60">
-              <Table className="border-0 rounded-none">
-              <TableHeader className="sticky top-0 z-10">
-                <TableRow>
-                  <TableHead>PO</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">ETA</TableHead>
-                  <TableHead>Lines</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {supply.open_pos
-                  .slice()
-                  .sort((a, b) => a.eta_week - b.eta_week)
-                  .map((po) => (
-                    <TableRow key={po.po_number}>
-                      <TableCell className="py-3 font-medium">{po.po_number}</TableCell>
-                      <TableCell className="py-3 text-ds-text-secondary">{po.supplier}</TableCell>
-                      <TableCell className="py-3">
-                        <Badge
-                          variant={po.status === "in_transit" ? "secondary" : po.status === "planned" ? "outline" : "default"}
-                          className="text-[11px]"
-                        >
-                          {po.status.replace("_", " ")}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="py-3 text-right tabular-nums">W{po.eta_week}</TableCell>
-                      <TableCell className="py-3 text-xs text-ds-text-secondary leading-snug">
-                        {po.lines
-                          .map((l) => {
-                            const part = supply.parts.find((p) => p.id === l.part_id);
-                            const label = part ? part.name : l.part_id;
-                            return `${label} × ${l.qty.toLocaleString()}`;
-                          })
-                          .join(" · ")}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
+          {/* ── Open POs table ── */}
+          <div className="ds-card" style={{ padding: 24 }}>
+            <div className="flex items-center gap-2 mb-4">
+              <Truck className="w-4 h-4" style={{ color: C.LABEL }} />
+              <h3 style={{ fontSize: 15, fontWeight: 600, color: C.VALUE }}>Upcoming parts orders (open POs)</h3>
+              <span style={{ fontSize: 11, padding: "3px 8px", border: `1px solid ${C.BORDER}`, borderRadius: 8, color: C.LABEL }}>ETA weeks are relative</span>
             </div>
-          )}
+            {supply && incomingByPart.length > 0 ? (
+              <div style={{ maxHeight: 320, overflowY: "auto", borderRadius: 10, border: `1px solid ${C.BORDER}` }}>
+                <Table className="border-0">
+                  <TableHeader>
+                    <TableRow style={{ background: C.TABLE_HEAD_BG }} className="hover:bg-transparent">
+                      <TableHead style={{ color: C.LABEL }}>Part</TableHead>
+                      <TableHead style={{ color: C.LABEL }}>Supplier</TableHead>
+                      <TableHead className="text-right" style={{ color: C.LABEL }}>On order</TableHead>
+                      <TableHead className="text-right" style={{ color: C.LABEL }}>Next ETA</TableHead>
+                      <TableHead className="text-right" style={{ color: C.LABEL }}>POs</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {incomingByPart.map((p) => (
+                      <TableRow key={p.partId}
+                        onMouseEnter={e => { e.currentTarget.style.background = C.ROW_HOVER; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = ""; }}
+                      >
+                        <TableCell className="py-2">
+                          <p style={{ fontWeight: 600, color: C.VALUE, fontSize: 13 }}>{p.partName} <span style={{ fontSize: 11, color: C.LABEL }}>· {p.partId}</span></p>
+                        </TableCell>
+                        <TableCell className="py-2" style={{ color: C.BODY, fontSize: 12 }}>{p.supplier}</TableCell>
+                        <TableCell className="py-2 text-right tabular-nums" style={{ color: C.VALUE }}>{p.onOrder.toLocaleString()}</TableCell>
+                        <TableCell className="py-2 text-right tabular-nums" style={{ color: C.AMBER, fontWeight: 600 }}>{p.nextEtaWeek ? `W${p.nextEtaWeek}` : "—"}</TableCell>
+                        <TableCell className="py-2 text-right tabular-nums" style={{ color: C.BODY }}>{p.poCount}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <p style={{ fontSize: 13, color: C.LABEL }}>No purchase order data configured for this SKU.</p>
+            )}
+          </div>
+
         </div>
-      </div>
+      ) : null}
     </section>
   );
 }
